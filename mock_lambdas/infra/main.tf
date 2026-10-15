@@ -116,7 +116,7 @@ resource "aws_cloudwatch_log_group" "this" {
 resource "aws_lambda_function" "this" {
   for_each         = local.functions
   function_name    = each.value.name
-  description      = "MOCK ${each.key} de ECG — contrato v1 (ecg-backend/CONTRATO_LAMBDAS.md)"
+  description      = "MOCK ${each.key} de ECG — contrato v1 (ecg-lambdas-v1/CONTRATO_LAMBDAS.md)"
   role             = aws_iam_role.this[each.key].arn
   handler          = "handler.handler"
   runtime          = "python3.12"

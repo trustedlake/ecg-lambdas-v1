@@ -1,0 +1,10 @@
+mock_lambdas/build/
+mock_lambdas/infra/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
