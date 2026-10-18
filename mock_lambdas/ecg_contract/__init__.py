@@ -1,4 +1,4 @@
-"""Contrato v1 das lambdas de leitura e interpretação de ECG.
+"""Contrato das lambdas de leitura e interpretação de ECG.
 
 Módulo compartilhado pelas lambdas mock (e reutilizável pelas reais):
 catálogo de erros/avisos, layouts suportados e o envelope de resposta.
@@ -8,7 +8,8 @@ A especificação legível fica em CONTRATO_LAMBDAS.md, na raiz do repo.
 import time
 import uuid
 
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "2.0"
+INTERPRET_LEGACY_VERSION = "1.0"
 
 STATUS_OK = "OK"
 STATUS_OK_WITH_WARNINGS = "OK_WITH_WARNINGS"
@@ -42,12 +43,13 @@ SCENARIO_REFUSED = "refused"
 ERRORS = {
     # Comuns
     "INVALID_PAYLOAD": ("validation", False, "O payload precisa ser um objeto JSON."),
-    "UNSUPPORTED_CONTRACT_VERSION": ("validation", False, "Versão de contrato não suportada; use 1.0."),
+    "UNSUPPORTED_CONTRACT_VERSION": ("validation", False, "Versão de contrato não suportada para esta operação."),
     "REQUEST_ID_INVALID": ("validation", False, "request_id ausente ou inválido (use o UUID da tentativa)."),
     "MOCK_SCENARIO_INVALID": ("validation", False, "Cenário de teste (mock) inválido."),
     "STORAGE_ERROR": ("internal", True, "Falha ao ler ou gravar artefatos no S3."),
     "INTERNAL_ERROR": ("internal", True, "Erro interno inesperado na lambda."),
     # Leitura — validação de entrada
+    "IMAGE_SOURCE_FORBIDDEN": ("validation", False, "Fonte reservada para testes não pode ser lida pelo adaptador."),
     "IMAGE_MISSING": ("validation", False, "Informe a imagem do ECG (image.bucket e image.key)."),
     "IMAGE_NOT_FOUND": ("validation", False, "A imagem informada não existe no S3."),
     "IMAGE_FORMAT_UNSUPPORTED": ("validation", False, "Formato de imagem não suportado; envie JPG, PNG ou WebP."),
@@ -56,6 +58,8 @@ ERRORS = {
     "IMAGE_UNREADABLE": ("validation", False, "Não foi possível decodificar a imagem enviada."),
     "LAYOUT_MISSING": ("validation", False, "Informe o layout de derivações (ex.: 3x4+1)."),
     "LAYOUT_UNSUPPORTED": ("validation", False, "Layout de derivações não suportado."),
+    "READ_REFUSED_UNREADABLE_TRACE": ("refused", False, "Nenhum método conseguiu recuperar sinal confiável; envie outra imagem para revisão."),
+    "READ_SELECTOR_UNAVAILABLE": ("processing", False, "Modelo do seletor aprovado indisponível; processamento não executado."),
     "CALIBRATION_INVALID": ("validation", False, "Calibração inválida; velocidade 12.5/25/50 mm/s e ganho 5/10/20 mm/mV."),
     # Leitura — recusa (empecilho visível; o usuário deve fotografar de novo)
     "READ_REFUSED_BLURRY": ("refused", False, "A imagem está borrada ou fora de foco; fotografe novamente com o papel nítido."),
@@ -82,6 +86,11 @@ ERRORS = {
 
 WARNINGS = {
     # Leitura
+    "AMBIGUOUS_TRACE": "O traçado contém regiões ambíguas que exigem revisão humana.",
+    "GRID_CALIBRATION_UNCERTAIN": "Calibração da grade não confirmada.",
+    "GEOMETRY_FALLBACK": "Geometria estimada por método de contingência.",
+    "ORIENTATION_UNCERTAIN": "A orientação da imagem não pôde ser confirmada.",
+    "METHODS_PARTIAL_RESULT": "Alguns métodos não produziram sinais; confira os status individuais.",
     "LEAD_PARTIAL_TRACE": "Traçado extraído parcialmente; trechos sem leitura vêm como null.",
     "LEAD_SATURATED": "Traçado encosta na derivação vizinha; amplitudes podem estar cortadas.",
     "IMAGE_ROTATION_CORRECTED": "A imagem estava inclinada e foi alinhada automaticamente.",
@@ -128,6 +137,7 @@ class Envelope:
 
     def __init__(self, operation, engine, engine_version):
         self.operation = operation
+        self.contract_version = INTERPRET_LEGACY_VERSION if operation in ("interpret", "legacy_read") else CONTRACT_VERSION
         self.engine = engine
         self.engine_version = engine_version
         self.request_id = None
@@ -139,7 +149,7 @@ class Envelope:
                 "duration_ms": int((time.monotonic() - self._started) * 1000)}
         if self.scenario:
             meta["mock_scenario"] = self.scenario
-        return {"contract_version": CONTRACT_VERSION, "operation": self.operation,
+        return {"contract_version": self.contract_version, "operation": self.operation,
                 "request_id": self.request_id, "status": status,
                 "warnings": warnings or [], "error": error, "result": result, "meta": meta}
 
@@ -152,12 +162,13 @@ class Envelope:
         return self._build(status, error=exc.as_dict())
 
 
-def validate_common(event):
+def validate_common(event, operation="interpret"):
     """Valida o que é comum às duas lambdas e devolve (request_id, mock)."""
     if not isinstance(event, dict):
         raise ContractError("INVALID_PAYLOAD")
-    version = event.get("contract_version", CONTRACT_VERSION)
-    if version != CONTRACT_VERSION:
+    version = event.get("contract_version", INTERPRET_LEGACY_VERSION if operation in ("interpret", "legacy_read") else CONTRACT_VERSION)
+    allowed = ("1.0", "2.0") if operation == "interpret" else (("1.0",) if operation == "legacy_read" else ("2.0",))
+    if version not in allowed:
         raise ContractError("UNSUPPORTED_CONTRACT_VERSION", details={"received": version})
     request_id = event.get("request_id")
     try:

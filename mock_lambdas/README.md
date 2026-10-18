@@ -1,3 +1,5 @@
+> **Atualização (contrato 2.0 de leitura):** `reading/handler.py` referencia a integração real `ecg-analyser/extractor/lambda_v1.py`. O build ZIP existente preserva deliberadamente o mock legado em `reading/mock_handler.py` e NÃO publica a leitura real. A interpretação continua mock (contrato 1.0). Veja `../CONTRATO_LAMBDAS.md` e `ecg-analyser/extractor/INTEGRACAO_LAMBDA_V1.md` antes de qualquer deploy.
+
 # Lambdas mock de leitura e interpretação de ECG
 
 Implementam o **contrato v1** ([`../CONTRATO_LAMBDAS.md`](../CONTRATO_LAMBDAS.md)) com resultados sintéticos,
@@ -5,7 +7,7 @@ para validar o fluxo app → backend → lambdas antes dos algoritmos reais (Ope
 
 | Função AWS | Código | Faz de verdade | É sintético |
 |---|---|---|---|
-| `ecg-reading-mock` | `reading/handler.py` | valida payload, lê e decodifica a foto no S3, desenha grade e traço sobre ela, grava `overlay.png` e `signal.json` | o sinal (72 bpm) e a posição da grade |
+| `ecg-reading-mock` | `reading/mock_handler.py` | valida payload, lê e decodifica a foto no S3, desenha grade e traço sobre ela, grava `overlay.png` e `signal.json` | o sinal (72 bpm) e a posição da grade |
 | `ecg-interpretation-mock` | `interpretation/handler.py` | valida sexo e sinal, mede FC e amplitudes no sinal recebido, aplica limiares por sexo | PR, QRS, QT e eixo |
 
 `ecg_contract/` (envelope, catálogo de erros/avisos, layouts) é copiado para os dois pacotes e pode ser reaproveitado pelas lambdas reais.

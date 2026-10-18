@@ -1,3 +1,5 @@
+> **Integração pendente de deploy:** o read real 2.0 está no `ecg-analyser/extractor/lambda_v1.py`; `mock_lambdas/build.sh` continua empacotando o mock antigo. Veja `CONTRATO_LAMBDAS.md`.
+
 # ecg-lambdas-v1
 
 Lambdas de **leitura** e **interpretação** de ECG do projeto ECG, e o contrato v1 entre elas e o backend

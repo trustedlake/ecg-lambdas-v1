@@ -23,14 +23,14 @@ os.environ.pop("MOCK_SCENARIO", None)
 from ecg_contract import ERRORS, LAYOUTS, WARNINGS  # noqa: E402
 
 
-def _load(name):
-    spec = importlib.util.spec_from_file_location(f"{name}_handler", os.path.join(ROOT, name, "handler.py"))
+def _load(name, filename="handler.py"):
+    spec = importlib.util.spec_from_file_location(f"{name}_handler", os.path.join(ROOT, name, filename))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-reading = _load("reading")
+reading = _load("reading", "mock_handler.py")
 interpretation = _load("interpretation")
 
 
