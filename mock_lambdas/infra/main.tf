@@ -132,3 +132,61 @@ resource "aws_lambda_function" "this" {
 
   depends_on = [aws_cloudwatch_log_group.this, aws_iam_role_policy_attachment.basic]
 }
+
+# ---------------------------------------------------------------------------
+# Leitura REAL (ecg-analyser, contrato 2.0): Lambda em imagem de container.
+# Imagem no repo ECR já existente "ecg-analyser", tag var.reading_image_tag.
+# O mock "ecg-reading-mock" acima continua intacto.
+# ---------------------------------------------------------------------------
+data "aws_ecr_repository" "analyser" {
+  name = "ecg-analyser"
+}
+
+resource "aws_iam_role" "reading_real" {
+  name = "ecg-reading-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "reading_real_basic" {
+  role       = aws_iam_role.reading_real.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "reading_real_s3" {
+  name = "ecg-reading-s3"
+  role = aws_iam_role.reading_real.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = "s3:GetObject", Resource = "${data.aws_s3_bucket.images.arn}/*" },
+      { Effect = "Allow", Action = "s3:PutObject", Resource = "${data.aws_s3_bucket.results.arn}/reading/*" },
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "reading_real" {
+  name              = "/aws/lambda/ecg-reading"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "reading_real" {
+  function_name = "ecg-reading"
+  description   = "Leitura REAL de ECG (ecg-analyser, 6 metodos, contrato 2.0)"
+  role          = aws_iam_role.reading_real.arn
+  package_type  = "Image"
+  image_uri     = "${data.aws_ecr_repository.analyser.repository_url}:${var.reading_image_tag}"
+  architectures = ["x86_64"]
+  timeout       = 900
+  memory_size   = 3538 # 2 vCPU: os 6 metodos rodam em subprocessos
+  environment {
+    variables = { RESULTS_BUCKET = data.aws_s3_bucket.results.id, CODE_VERSION = var.code_version }
+  }
+  depends_on = [aws_cloudwatch_log_group.reading_real, aws_iam_role_policy_attachment.reading_real_basic]
+}
