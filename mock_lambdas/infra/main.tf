@@ -47,7 +47,7 @@ locals {
     reading = {
       name        = "ecg-reading-mock"
       memory_size = 1769 # 1 vCPU inteira: o PNG do overlay é CPU-bound
-      timeout     = 60
+      timeout     = 900 # 15 min (maximo do Lambda); leitura real leva 50-190 s
       environment = merge({ RESULTS_BUCKET = data.aws_s3_bucket.results.id, CODE_VERSION = var.code_version }, local.mock_env)
     }
     interpretation = {
