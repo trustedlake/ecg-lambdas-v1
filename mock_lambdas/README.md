@@ -7,8 +7,8 @@ para validar o fluxo app → backend → lambdas antes dos algoritmos reais (Ope
 
 | Função AWS | Código | Faz de verdade | É sintético |
 |---|---|---|---|
-| `ecg-reading-mock` | `reading/mock_handler.py` | valida payload, lê e decodifica a foto no S3, desenha grade e traço sobre ela, grava `overlay.png` e `signal.json` | o sinal (72 bpm) e a posição da grade |
-| `ecg-interpretation-mock` | `interpretation/handler.py` | valida sexo e sinal, mede FC e amplitudes no sinal recebido, aplica limiares por sexo | PR, QRS, QT e eixo |
+| `ecg-reading` | `reading/mock_handler.py` | valida payload, lê e decodifica a foto no S3, desenha grade e traço sobre ela, grava `overlay.png` e `signal.json` | o sinal (72 bpm) e a posição da grade |
+| `ecg-interpretation` | `interpretation/handler.py` | valida sexo e sinal, mede FC e amplitudes no sinal recebido, aplica limiares por sexo | PR, QRS, QT e eixo |
 
 `ecg_contract/` (envelope, catálogo de erros/avisos, layouts) é copiado para os dois pacotes e pode ser reaproveitado pelas lambdas reais.
 
@@ -41,3 +41,10 @@ Stack independente (state `s3://ecg-lambdas-terraform-state/ecg-mock-lambdas/ter
 retenção de 30 dias. O principal IAM do backend precisa de `lambda:InvokeFunction` nos ARNs em `terraform output function_arns`.
 
 Para trocar pelas lambdas reais, aponte `AWS_LAMBDA_ECG_READING` / `AWS_LAMBDA_ECG_INTERPRETATION` no backend para as novas funções.
+
+## Campo `mock`
+
+Não existem Lambdas separadas de mock. `ecg-reading` e `ecg-interpretation` aceitam o campo
+`mock: {"scenario": "success" | "success_with_warnings" | "failure" | "refused"}` no payload
+(interpretação: sem `refused`). Com ele, a leitura valida a entrada de verdade e devolve um
+sinal sintético no formato 2.0 (6 métodos); sem ele, roda a extração real.

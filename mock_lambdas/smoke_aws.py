@@ -16,7 +16,7 @@ import boto3
 from botocore.config import Config
 
 IMAGES_BUCKET = "ecg-lambdas-images-785236377332-sa-east-1"
-READING, INTERPRETATION = "ecg-reading-mock", "ecg-interpretation-mock"
+READING, INTERPRETATION = "ecg-reading", "ecg-interpretation"
 
 
 def main():

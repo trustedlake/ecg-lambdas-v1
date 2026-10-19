@@ -8,7 +8,7 @@ Lambdas de **leitura** e **interpretação** de ECG do projeto ECG, e o contrato
 | O quê | Onde |
 |---|---|
 | Contrato v1: request, response, catálogo de erros, cenários e regras para as lambdas reais | [`CONTRATO_LAMBDAS.md`](CONTRATO_LAMBDAS.md) |
-| Mocks deployados (`ecg-reading-mock`, `ecg-interpretation-mock`), testes, smoke test e Terraform | [`mock_lambdas/`](mock_lambdas/README.md) |
+| Mocks deployados (`ecg-reading`, `ecg-interpretation`), testes, smoke test e Terraform | [`mock_lambdas/`](mock_lambdas/README.md) |
 | Módulo comum (envelope, validação, catálogo), reaproveitável pelas lambdas reais | [`mock_lambdas/ecg_contract/`](mock_lambdas/ecg_contract/__init__.py) |
 
 AWS: conta `785236377332`, região `sa-east-1`, profile `trustedlake`.

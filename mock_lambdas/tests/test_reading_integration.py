@@ -31,6 +31,8 @@ else:
 
 from test_handlers import FakeS3, _image_bytes
 
+SIX = ['baseline_peaks', 'chromatic_ink', 'faint_ink', 'uneven_photo', 'grayscale_contrast', 'same_appearance']
+
 
 @unittest.skipUnless(real is not None, 'ecg-analyser/extractor not available; set ECG_ANALYSER_EXTRACTOR_PATH')
 class RealContractTests(unittest.TestCase):
@@ -76,18 +78,19 @@ class RealContractTests(unittest.TestCase):
         grid = {'valid': True, 'x': {'pixels_per_mm': 6}, 'y': {'pixels_per_mm': 6}}
         with patch.object(real, '_verify_selector_model'), \
              patch('research_methods.frozen_peaks34.ecg.preprocess.prepare', return_value=(image, geom)), \
-             patch('research_methods.frozen_peaks34.ecg.grid.estimate_grid', return_value=grid):
+             patch('research_methods.frozen_peaks34.ecg.grid.estimate_grid', return_value=grid),              patch.dict('research_methods.registry.METHODS', clear=True,
+                        values={k: METHODS[k] for k in SIX}):
             def method_row(name, method, image, geo, gd, config, path):
                 return ({'method': name, 'version': method.VERSION, 'status': 'OK' if name == 'baseline_peaks' else 'ABSTAINED',
                          'selector_score': 87.0 if name == 'baseline_peaks' else None,
                          'sampling_rate_hz': 150 if name == 'baseline_peaks' else None,
-                         'reason': None, 'files': {'json': None, 'image': None, 'leads': None}}, [])
+                         'reason': None, 'warnings': [], 'files': {'json': None, 'image': None, 'leads': None}}, [])
             with patch.object(real, '_method_run', side_effect=method_row):
                 response = self.call()
                 self.assertEqual(response['status'], 'OK_WITH_WARNINGS')
                 self.assertEqual(len(response['result']['methods']), 6)
-                self.assertEqual(list(METHODS), [x['method'] for x in response['result']['methods']])
-                self.assertEqual(response['warnings'][0]['code'], 'METHODS_PARTIAL_RESULT')
+                self.assertEqual(SIX, [x['method'] for x in response['result']['methods']])
+                self.assertNotIn('warnings', response)
             with patch.object(real, '_method_run', side_effect=lambda name, method, *args:
                    ({'method': name, 'status': 'BLOCKED', 'reason': 'gate', 'selector_score': None, 'files': {}}, [])):
                 response = self.call()
@@ -99,6 +102,24 @@ class RealContractTests(unittest.TestCase):
                 response = self.call()
                 self.assertEqual(response['status'], 'ERROR')
                 self.assertEqual(response['error']['code'], 'READ_SELECTOR_UNAVAILABLE')
+
+    def test_mock_field_runs_the_same_lambda_with_synthetic_signal(self):
+        for scenario, status in (('success', 'OK'), ('success_with_warnings', 'OK_WITH_WARNINGS')):
+            with self.subTest(scenario=scenario):
+                response = self.call(mock={'scenario': scenario})
+                self.assertEqual(response['status'], status)
+                self.assertNotIn('warnings', response)
+                methods = response['result']['methods']
+                self.assertEqual(len(methods), 6)
+                self.assertTrue(all('warnings' in m for m in methods))
+                leads = json.loads(self.client.objects[methods[0]['files']['leads']['bucket'],
+                                                       methods[0]['files']['leads']['key']])
+                self.assertEqual(len(leads['leads']), 13)
+        response = self.call(mock={'scenario': 'refused'})
+        self.assertEqual(response['status'], 'REFUSED')
+        response = self.call(mock={'scenario': 'failure'})
+        self.assertEqual(response['status'], 'ERROR')
+        self.assertEqual(self.call(mock={'scenario': 'nope'})['error']['code'], 'MOCK_SCENARIO_INVALID')
 
     @staticmethod
     def measured_extraction():

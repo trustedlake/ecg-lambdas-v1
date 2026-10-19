@@ -44,14 +44,8 @@ data "aws_s3_bucket" "results" {
 locals {
   mock_env = var.mock_scenario == "" ? {} : { MOCK_SCENARIO = var.mock_scenario }
   functions = {
-    reading = {
-      name        = "ecg-reading-mock"
-      memory_size = 1769 # 1 vCPU inteira: o PNG do overlay é CPU-bound
-      timeout     = 900 # 15 min (maximo do Lambda); leitura real leva 50-190 s
-      environment = merge({ RESULTS_BUCKET = data.aws_s3_bucket.results.id, CODE_VERSION = var.code_version }, local.mock_env)
-    }
     interpretation = {
-      name        = "ecg-interpretation-mock"
+      name        = "ecg-interpretation"
       memory_size = 256
       timeout     = 30
       environment = merge({ CODE_VERSION = var.code_version }, local.mock_env)
@@ -85,28 +79,6 @@ resource "aws_iam_role_policy_attachment" "basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Leitura: lê a foto no bucket de imagens e grava artefatos só sob reading/ no de resultados.
-resource "aws_iam_role_policy" "reading_s3" {
-  name = "ecg-reading-mock-s3"
-  role = aws_iam_role.this["reading"].id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = "s3:GetObject"
-        Resource = "${data.aws_s3_bucket.images.arn}/*"
-      },
-      {
-        # Sem ListBucket, objeto inexistente volta 403; a lambda trata como IMAGE_NOT_FOUND.
-        Effect   = "Allow"
-        Action   = "s3:PutObject"
-        Resource = "${data.aws_s3_bucket.results.arn}/reading/*"
-      },
-    ]
-  })
-}
-
 resource "aws_cloudwatch_log_group" "this" {
   for_each          = local.functions
   name              = "/aws/lambda/${each.value.name}"
@@ -116,7 +88,7 @@ resource "aws_cloudwatch_log_group" "this" {
 resource "aws_lambda_function" "this" {
   for_each         = local.functions
   function_name    = each.value.name
-  description      = "MOCK ${each.key} de ECG — contrato v1 (ecg-lambdas-v1/CONTRATO_LAMBDAS.md)"
+  description      = "${each.key} de ECG — contrato v1 (ecg-lambdas-v1/CONTRATO_LAMBDAS.md)"
   role             = aws_iam_role.this[each.key].arn
   handler          = "handler.handler"
   runtime          = "python3.12"
@@ -136,7 +108,6 @@ resource "aws_lambda_function" "this" {
 # ---------------------------------------------------------------------------
 # Leitura REAL (ecg-analyser, contrato 2.0): Lambda em imagem de container.
 # Imagem no repo ECR já existente "ecg-analyser", tag var.reading_image_tag.
-# O mock "ecg-reading-mock" acima continua intacto.
 # ---------------------------------------------------------------------------
 data "aws_ecr_repository" "analyser" {
   name = "ecg-analyser"
