@@ -40,7 +40,8 @@ DISCLAIMER = ("Resultado gerado automaticamente a partir do sinal extraído. "
 def handler(event, context):
     env = Envelope("interpret", ENGINE, ENGINE_VERSION)
     try:
-        env.request_id = validate_common(event)
+        env.request_id = validate_common(event, operation="interpret")
+        env.contract_version = event.get("contract_version", "1.0")
         scenario, code = resolve_mock(event, os.environ.get("MOCK_SCENARIO"), SCENARIOS, SCENARIO_CODES)
         env.scenario = scenario
         sex = _validate_patient(event.get("patient"))

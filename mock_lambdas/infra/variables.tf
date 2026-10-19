@@ -32,3 +32,9 @@ variable "mock_scenario" {
     error_message = "mock_scenario deve ser vazio, success, success_with_warnings, failure ou refused."
   }
 }
+
+variable "reading_image_tag" {
+  type        = string
+  description = "Tag da imagem da leitura real no repo ECR ecg-analyser."
+  default     = "v1-reading"
+}

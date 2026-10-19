@@ -8,7 +8,11 @@ PYTHON="${PYTHON:-python3}"
 rm -rf build
 for fn in reading interpretation; do
   mkdir -p "build/$fn"
-  cp "$fn/handler.py" "build/$fn/"
+  if [ "$fn" = reading ]; then
+    cp "$fn/mock_handler.py" "build/$fn/handler.py"  # existing deployed mock; not real analyser
+  else
+    cp "$fn/handler.py" "build/$fn/"
+  fi
   cp -R ecg_contract "build/$fn/"
 done
 "$PYTHON" -m pip install --quiet --target build/reading \
