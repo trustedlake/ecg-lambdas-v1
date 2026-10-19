@@ -1,22 +1,11 @@
 #!/usr/bin/env bash
-# Monta os pacotes ZIP das lambdas mock em mock_lambdas/build/<lambda>/.
-# Pillow é baixado como wheel Linux arm64 / CPython 3.12 (runtime da Lambda),
-# então funciona a partir do macOS sem Docker. boto3 já vem no runtime.
+# Monta o pacote ZIP da lambda ecg-interpretation em mock_lambdas/build/interpretation/.
+# (A ecg-reading é imagem de container: veja real_reading/assemble.sh.)
 set -euo pipefail
 cd "$(dirname "$0")"
-PYTHON="${PYTHON:-python3}"
 rm -rf build
-for fn in reading interpretation; do
-  mkdir -p "build/$fn"
-  if [ "$fn" = reading ]; then
-    cp "$fn/mock_handler.py" "build/$fn/handler.py"  # existing deployed mock; not real analyser
-  else
-    cp "$fn/handler.py" "build/$fn/"
-  fi
-  cp -R ecg_contract "build/$fn/"
-done
-"$PYTHON" -m pip install --quiet --target build/reading \
-  --platform manylinux2014_aarch64 --implementation cp --python-version 3.12 \
-  --only-binary=:all: "pillow==12.*"
+mkdir -p build/interpretation
+cp interpretation/handler.py build/interpretation/
+cp -R ecg_contract build/interpretation/
 find build -name '__pycache__' -prune -exec rm -rf {} +
-echo "ok: $(du -sh build/reading | cut -f1) reading, $(du -sh build/interpretation | cut -f1) interpretation"
+echo "ok: $(du -sh build/interpretation | cut -f1) interpretation"

@@ -4,8 +4,8 @@ Fonte da verdade do contrato entre o backend Django e as duas lambdas:
 
 | Lambda | Mock (este repo, `mock_lambdas/`) | Real (Chris, OpenCV 5) |
 |---|---|---|
-| **Leitura** (`operation: "read"`) | `ecg-reading-mock` | substitui o mock mantendo este contrato |
-| **Interpretação** (`operation: "interpret"`) | `ecg-interpretation-mock` | substitui o mock mantendo este contrato |
+| **Leitura** (`operation: "read"`) | `ecg-reading` | substitui o mock mantendo este contrato |
+| **Interpretação** (`operation: "interpret"`) | `ecg-interpretation` | substitui o mock mantendo este contrato |
 
 O backend escolhe a função pelo nome (env `AWS_LAMBDA_ECG_READING` / `AWS_LAMBDA_ECG_INTERPRETATION`);
 trocar o mock pela real é só trocar o nome. O catálogo de códigos está em código em
@@ -37,7 +37,7 @@ reaproveitar esse módulo. Um teste falha se algum código do catálogo faltar n
   "warnings": [{"code": "LEAD_PARTIAL_TRACE", "message": "…", "lead": "V2"}],
   "error": null,
   "result": { "…": "específico da operação; null quando status é REFUSED/ERROR" },
-  "meta": {"engine": "ecg-reading-mock", "engine_version": "git sha", "duration_ms": 235,
+  "meta": {"engine": "ecg-reading", "engine_version": "git sha", "duration_ms": 235,
            "mock_scenario": "success (só nos mocks)"}
 }
 ```

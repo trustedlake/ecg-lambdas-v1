@@ -1,4 +1,4 @@
-"""Lambda MOCK de interpretação de ECG (contrato v1, operation=interpret).
+"""Lambda de interpretação de ECG (contrato v1, operation=interpret).
 
 Valida sinal e sexo do paciente de verdade. A frequência cardíaca e as
 amplitudes saem do sinal recebido (detecção simples de picos R); os demais
@@ -20,7 +20,7 @@ from ecg_contract import (
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-ENGINE = "ecg-interpretation-mock"
+ENGINE = "ecg-interpretation"
 ENGINE_VERSION = os.environ.get("CODE_VERSION", "dev")
 SEXES = ("F", "M")
 MIN_RATE_HZ, MAX_RATE_HZ = 100, 2000
