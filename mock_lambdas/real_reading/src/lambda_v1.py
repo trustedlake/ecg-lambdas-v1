@@ -1,6 +1,6 @@
 """Adapter for ecg-lambdas-v1 reading contract 2.0.
 
-Lives in ecg-analyser; the v1 reading handler is only an import shim.
+Algorithm is vendored under algorithm/; the v1 reading handler is only an import shim.
 No frozen research outputs, file-ID overrides or training data at runtime.
 This module does NOT provision AWS resources or bypass the approved color gate.
 """
@@ -24,7 +24,7 @@ from ecg_contract import (ContractError, Envelope, GAINS_MM_MV, LAYOUTS,
                           SPEEDS_MM_S, warning, validate_common)
 
 LOG = logging.getLogger(__name__)
-ENGINE = 'ecg-analyser'
+ENGINE = 'ecg-lambdas-v1'
 ENGINE_VERSION = os.environ.get('CODE_VERSION', 'dev')
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 MAX_IMAGE_PIXELS = 24_000_000

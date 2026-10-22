@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 .venv/
 .DS_Store
+
+mock_lambdas/real_reading/models/
+mock_lambdas/real_reading/build/
