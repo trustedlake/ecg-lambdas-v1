@@ -1,14 +1,11 @@
 """Rule-based ECG diagnoser (screening aid, not a medical report).
 
-Works on the extracted signal (mV, native sampling rate, gaps as None) using the
-published AHA/ACCF/HRS interpretation criteria (Surawicz, Rautaharju, Hancock,
-Wagner et al., 2009) that can be checked on an extracted trace: QRS duration and
-bundle branch block (Part III), voltage criteria for hypertrophy (Part V),
-ST/Q-wave screening for ischaemia (Part VI) and the rate/rhythm thresholds.
-Anything that cannot be measured reliably from a photographed trace (P wave, PR,
-QT) is returned as not measurable instead of being estimated. Stdlib only. No
-tuning per image: every threshold is a published criterion or a fixed fraction
-of the signal itself.
+Works on the extracted signal (mV, native sampling rate, gaps as None) using published
+interpretation criteria that can be checked on an extracted trace: QRS duration, voltage
+criteria for hypertrophy, axis and the rate/rhythm thresholds. ST, Q-wave and bundle
+branch findings are computed but only reported when EXPERIMENTAL is set. Anything that
+cannot be measured reliably from a photographed trace (P wave, PR, QT) is returned as not
+measurable instead of being estimated. Stdlib only. No tuning per image.
 """
 
 import math
@@ -29,6 +26,7 @@ CORNELL_MV = {"F": 2.0, "M": 2.8}
 RVH_MV = 1.05
 HR_LOW, HR_HIGH, PAUSE_S = 50, 100, 2.0
 NAN = float("nan")
+EXPERIMENTAL = False
 
 
 class NoQrs(Exception):
@@ -238,7 +236,7 @@ def diagnose(sex, fs, leads):
     if max(rr) > PAUSE_S:
         find("PAUSE", "Pause", "warning", f"longest RR {max(rr):.1f} s (> {PAUSE_S:.0f} s)")
 
-    # QRS duration and bundle branch block (Part III).
+    # QRS duration and bundle branch block .
     durations = sorted(d for d in (_stat(i, "dur_ms") for i in infos.values()) if d is not None)
     qrs = round(durations[min(int(0.75 * len(durations)), len(durations) - 1)]) if durations else None
     qrs_conf = "medium" if fs >= 200 and len(durations) >= 6 else "low"
@@ -255,8 +253,18 @@ def diagnose(sex, fs, leads):
     if qrs is not None:
         criteria.append(_criterion("QRS duration", qrs, "ms", WIDE_QRS_MS - 1, False, f"< {WIDE_QRS_MS} ms"))
         if qrs >= WIDE_QRS_MS:
-            # Bundle branch block subtyping, ST and Q findings are withheld until validated on labeled data.
-            find("WIDE_QRS", "Wide QRS (intraventricular conduction delay)", "warning", f"QRS {qrs} ms (≥ 120)")
+            wide_s = lambda l: (s_amp.get(l) or 0) > 0.5 * (r_amp.get(l) or 1e9)
+            rbbb = (notched("V1") or notched("V2")) and (wide_s("I") or wide_s("V6"))
+            lbbb = (net.get("V1") is not None and net["V1"] < 0
+                    and any((net.get(l) or 0) > 0 for l in ("I", "V6")) and not (septal_q("I") or septal_q("V6")))
+            if EXPERIMENTAL and rbbb and not lbbb:
+                find("RBBB_PATTERN", "Pattern suggestive of right bundle branch block", "warning",
+                     f"QRS {qrs} ms (≥ 120) with rSR'-type pattern in V1/V2 and wide S in I/V6")
+            elif EXPERIMENTAL and lbbb and not rbbb:
+                find("LBBB_PATTERN", "Pattern suggestive of left bundle branch block", "warning",
+                     f"QRS {qrs} ms (≥ 120), negative V1, positive I/V6 without septal q")
+            else:
+                find("WIDE_QRS", "Wide QRS (intraventricular conduction delay)", "warning", f"QRS {qrs} ms (≥ 120)")
         elif qrs >= BORDERLINE_QRS_MS:
             find("QRS_BORDERLINE", "Borderline QRS duration", "info", f"QRS {qrs} ms (110–119 ms range)")
 
@@ -273,7 +281,7 @@ def diagnose(sex, fs, leads):
         else:
             find("EXTREME_AXIS", "Extreme axis deviation", "warning", f"axis {axis}° (−90° to −180°)")
 
-    # Voltage criteria (Part V).
+    # Voltage criteria .
     sok = cor = None
     if s_amp.get("V1") is not None and (r_amp.get("V5") is not None or r_amp.get("V6") is not None):
         sok = round(s_amp["V1"] + max(r_amp.get("V5") or 0, r_amp.get("V6") or 0), 2)
@@ -292,13 +300,22 @@ def diagnose(sex, fs, leads):
             find("RVH_PATTERN", "Pattern suggestive of right ventricular hypertrophy", "warning",
                  f"R V1 + S V5/V6 {rv} mV (> {RVH_MV}) with right axis")
 
-    # ST segment and Q waves (Part VI): two contiguous leads, aVR excluded.
+    # ST segment and Q waves : two contiguous leads, aVR excluded.
     st = {n: _stat(i, "st") for n, i in infos.items() if i["beats"] and n != "aVR"}
     elev = {n for n, v in st.items() if v is not None and v >= (ST_ELEVATION_V2V3_MV[sex] if n in ("V2", "V3") else ST_ELEVATION_MV)}
     dep = {n for n, v in st.items() if v is not None and v <= -ST_DEPRESSION_MV}
     q = {n for n, i in infos.items() if n != "aVR" and (_stat(i, "q_ms") or 0) >= Q_MIN_MS and (_stat(i, "q_mv") or 0) >= Q_MIN_MV}
-    # Findings disabled (option C): ST elevation/depression and Q waves gave false positives on labeled records.
-    # elev, dep and q stay computed so they can be re-enabled after validation.
+    # ST/Q/BBB findings stay off in production until validated (EXPERIMENTAL is only set by the evaluation scripts).
+    if EXPERIMENTAL:
+        if _contiguous(elev):
+            find("ST_ELEVATION", "Possible ST elevation in contiguous leads", "critical",
+                 "leads " + ", ".join(_contiguous(elev)))
+        if _contiguous(dep):
+            find("ST_DEPRESSION", "Possible ST depression in contiguous leads", "warning",
+                 "leads " + ", ".join(_contiguous(dep)))
+        if _contiguous(q):
+            find("PATHOLOGICAL_Q", "Possible pathological Q waves in contiguous leads", "warning",
+                 "leads " + ", ".join(_contiguous(q)))
 
     warnings.append({"code": "MEASUREMENT_UNRELIABLE",
                      "message": "PR, QT, ST and Q-wave findings are not reported: they cannot be located reliably on an extracted trace."})

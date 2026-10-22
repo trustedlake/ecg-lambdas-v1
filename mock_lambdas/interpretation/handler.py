@@ -110,7 +110,7 @@ def _validate_signal(signal):
     return float(rate), leads
 
 
-# ─── Interpretação real (regras AHA/ACCF/HRS, ver diagnoser.py) ──────────────
+# ─── Interpretação real (regras publicadas, ver diagnoser.py) ──────────────
 
 def _diagnose(sex, rate, leads):
     present = {lead["name"] for lead in leads}
