@@ -1,0 +1,30 @@
+{
+  "commit": "323b4e6a0ad1eae69526d88b6620c2b8e9d4f05c",
+  "files": {
+    "ecg/__init__.py": "667d4a15b970b851e20d17510224670c14646cfb6d5a1e388ca6b9cc6da8bf41",
+    "ecg/config.py": "5f1a8133bd7d0ef54cf85b1de4cdda03d4a673d9e3ccc48ba0427bdd91d343ea",
+    "ecg/contrast_gate.py": "9f461fedd674c8cc68e96be2c29c6702ac4e8ff42a6eb79f28c63aa21b7b3006",
+    "ecg/extract.py": "52089cea8205b474c4510fa2fb5d289b29f927363039f265966f6a9b7bb82437",
+    "ecg/grid.py": "d2afa936d474aeb0db7093b6f56ce8aef2eb41dc72d413c003e6e41f9e44cdb4",
+    "ecg/grid_chromatic.py": "7c0437e235295363ff6a4d9bbd680e802c9f4224913641d486003fc7bfd633f4",
+    "ecg/manual_correction.py": "f6ca82153f797a25bbe44c92bd0110a78e95af04b2c8e257a569ed3b509234c2",
+    "ecg/orientation.py": "a878c7cc0d1aab4e6b13a863265a1b624053649bbc0f2b4d6e12eb34aefeee55",
+    "ecg/peak_recovery.py": "65ec38ed2ad51f9d7552ee7f71bd9574cc406af2674e1690eaf2bf60b2cf1880",
+    "ecg/pipeline.py": "38292fa60530dde146d023242acce3b10b2d93377d0eea310807ccd2907d2fc0",
+    "ecg/preprocess.py": "2a0e06a075d00a844509699b9a2a28f6293aaa5c38027541a55c4bb05240fa2a",
+    "ecg/signal.py": "bd2430433f5b919896caa0be8bb2a92edb26fd1632a19585f47b40e3e75af401",
+    "ecg/signal_affine.py": "8ebd743b70f4a8ee0764be8a447a813ba7fe17df36da3d6c5670b9345e325dbd",
+    "ecg/signal_chromatic_paths.py": "336ea4d2eb56b847893457f481b70b8988dbd2dc0dbc780468c16406d3cc74d5",
+    "ecg/signal_dark.py": "be4b093f40e8e77032b8475dac7623c9cafdd431175cd619507cb781a83f0fef",
+    "ecg/signal_dark_paths.py": "98933dbde028931855177c5d4802d470517af3ff9a43a8bc077594934a37bf23",
+    "ecg/signal_excursions.py": "7f1fb8ce0791e448b96c3ca566a9406e92ece205747034a11f890fda2f3ccf4a",
+    "ecg/signal_focal_contrast.py": "6dda166f9feef18e684838beb2029f83b3d1a9be74068605746b0871840e9b27",
+    "ecg/signal_neutral.py": "db08f2c01b08ea0dfe76a80d91b307940e298125689f1400e624f7dbce392853",
+    "ecg/signal_peak_ridges.py": "1d0e128e30980006c136c365d15b94521e82e2de8d3f26b87a86def7717faf93",
+    "ecg/signal_printed.py": "9f33814ece72015eba444c39523f6b5cb497b9555fdc57ccbcf9d8c1d0d19bb4",
+    "ecg/signal_segmented.py": "b62b264c35052ccce6fd0fe010aca90ffb96d43e24370fd4fe11960588e03672",
+    "ecg/signal_tinted.py": "7e22060ee51e678ad040c085e9ff893983189203103b9e4eec28e3bcfdc14dba",
+    "ecg/trace_ownership.py": "b67580ebaae2537f284a84bc893cd66dfdc453d10e949743cd20f9ffb2724d9c",
+    "ecg/trace_refinement.py": "f42fc8d5ebb5f6004064f0c2d51764644ef72d6fd062b2bc63009a213cc11e38"
+  }
+}

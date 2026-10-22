@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "expected_orientation": "landscape",
+  "id": "d0",
+  "description": "D0 - gerada por IA",
+  "max_side": 2400,
+  "minor_square_mm": 1,
+  "leads": [
+    [
+      "I",
+      "aVR",
+      "V1",
+      "V4"
+    ],
+    [
+      "II",
+      "aVL",
+      "V2",
+      "V5"
+    ],
+    [
+      "III",
+      "aVF",
+      "V3",
+      "V6"
+    ]
+  ],
+  "rhythm_leads": [
+    "II_longo"
+  ],
+  "baseline_fractions": [
+    0.414,
+    0.583,
+    0.752,
+    0.904
+  ],
+  "paper_baseline_fractions": [
+    0.43,
+    0.59,
+    0.75,
+    0.9
+  ],
+  "signal_x_fraction": [
+    0.06,
+    0.958
+  ],
+  "label_exclusion_fraction": 0.008,
+  "calibration": {
+    "speed_mm_s": 25,
+    "gain_mm_mv": 10,
+    "speed_source": "Read manually from printed training examples; not inferred by software",
+    "gain_source": "Read manually from printed training examples; not inferred by software"
+  },
+  "calibration_scope": "Folder assumption from inspected training examples; individual exceptions must be explicit variants",
+  "review": {
+    "enabled_leads": null,
+    "excluded_intervals": []
+  },
+  "major_interval_minor_squares": 5,
+  "grid_width_mm_hint": 280,
+  "grid_width_hint_source": "Approximate grid extent from training layout; only restricts harmonic search, does not set pixel scale",
+  "reference_evaluation": {
+    "column_offsets_s": [
+      0,
+      2.5,
+      5,
+      7.5
+    ],
+    "max_lag_s": 0.25
+  }
+}

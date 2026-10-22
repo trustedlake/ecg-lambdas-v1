@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "id": "victoria",
+  "description": "Explicit 3x4 plus II rhythm screenshot layout",
+  "max_side": 2400,
+  "minor_square_mm": 1,
+  "major_interval_minor_squares": 5,
+  "grid_width_mm_hint": 265,
+  "grid_width_hint_source": "Approximate 50-55 large squares across inspected screenshots; harmonic search constraint only, not pixel scale",
+  "leads": [
+    [
+      "I",
+      "aVR",
+      "V1",
+      "V4"
+    ],
+    [
+      "II",
+      "aVL",
+      "V2",
+      "V5"
+    ],
+    [
+      "III",
+      "aVF",
+      "V3",
+      "V6"
+    ]
+  ],
+  "rhythm_leads": [
+    "II_longo"
+  ],
+  "baseline_fractions": [
+    0.14,
+    0.39,
+    0.635,
+    0.88
+  ],
+  "paper_baseline_fractions": [
+    0.14,
+    0.39,
+    0.635,
+    0.88
+  ],
+  "signal_x_fraction": [
+    0.005,
+    0.96
+  ],
+  "label_exclusion_fraction": 0.008,
+  "calibration": {
+    "speed_mm_s": null,
+    "gain_mm_mv": null
+  },
+  "calibration_scope": "Supply speed and gain explicitly; unknown values remain null",
+  "review": {
+    "enabled_leads": null,
+    "excluded_intervals": []
+  }
+}

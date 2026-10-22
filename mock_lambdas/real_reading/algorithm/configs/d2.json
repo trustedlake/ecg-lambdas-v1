@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "id": "d2",
+  "description": "D2 - Real",
+  "max_side": 2400,
+  "minor_square_mm": 1,
+  "leads": [
+    [
+      "aVL"
+    ],
+    [
+      "I"
+    ],
+    [
+      "-aVR"
+    ],
+    [
+      "II"
+    ],
+    [
+      "aVF"
+    ],
+    [
+      "III"
+    ]
+  ],
+  "rhythm_leads": [],
+  "baseline_fractions": [
+    0.305,
+    0.425,
+    0.545,
+    0.665,
+    0.785,
+    0.905
+  ],
+  "paper_baseline_fractions": [
+    0.312,
+    0.425,
+    0.538,
+    0.65,
+    0.763,
+    0.876
+  ],
+  "signal_x_fraction": [
+    0.07,
+    0.966
+  ],
+  "label_exclusion_fraction": 0.008,
+  "calibration": {
+    "speed_mm_s": 50,
+    "gain_mm_mv": 10,
+    "speed_source": "Read manually from printed training examples; not inferred by software",
+    "gain_source": "Read manually from printed training examples; not inferred by software"
+  },
+  "calibration_scope": "Folder assumption from inspected training examples; individual exceptions must be explicit variants",
+  "review": {
+    "enabled_leads": null,
+    "excluded_intervals": []
+  },
+  "major_interval_minor_squares": 5,
+  "grid_width_mm_hint": 280,
+  "grid_width_hint_source": "Approximate grid extent from training layout; only restricts harmonic search, does not set pixel scale",
+  "reference_evaluation": {
+    "column_offsets_s": [
+      0
+    ],
+    "max_lag_s": 0.25
+  }
+}

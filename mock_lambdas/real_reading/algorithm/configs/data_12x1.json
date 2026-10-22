@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "id": "data_12x1",
+  "description": "data",
+  "max_side": 2400,
+  "minor_square_mm": 1,
+  "leads": [
+    [
+      "I"
+    ],
+    [
+      "II"
+    ],
+    [
+      "III"
+    ],
+    [
+      "aVR"
+    ],
+    [
+      "aVL"
+    ],
+    [
+      "aVF"
+    ],
+    [
+      "V1"
+    ],
+    [
+      "V2"
+    ],
+    [
+      "V3"
+    ],
+    [
+      "V4"
+    ],
+    [
+      "V5"
+    ],
+    [
+      "V6"
+    ]
+  ],
+  "rhythm_leads": [],
+  "baseline_fractions": [
+    0.035,
+    0.117,
+    0.199,
+    0.281,
+    0.363,
+    0.44500000000000006,
+    0.527,
+    0.6090000000000001,
+    0.6910000000000001,
+    0.773,
+    0.8550000000000001,
+    0.937
+  ],
+  "paper_baseline_fractions": [
+    0.245,
+    0.305,
+    0.365,
+    0.425,
+    0.485,
+    0.5449999999999999,
+    0.605,
+    0.665,
+    0.725,
+    0.785,
+    0.845,
+    0.9049999999999999
+  ],
+  "signal_x_fraction": [
+    0.032,
+    0.982
+  ],
+  "label_exclusion_fraction": 0.006,
+  "calibration": {
+    "speed_mm_s": 25,
+    "gain_mm_mv": 10,
+    "speed_source": "Read manually from printed training examples; not inferred by software",
+    "gain_source": "User explicitly supplied 10 mm/mV on 2026-10-08; printed gain is XX mm/mV"
+  },
+  "calibration_scope": "Folder assumption from inspected training examples; individual exceptions must be explicit variants",
+  "review": {
+    "enabled_leads": null,
+    "excluded_intervals": []
+  },
+  "major_interval_minor_squares": 5,
+  "grid_width_mm_hint": 250,
+  "grid_width_hint_source": "Approximate grid extent from training layout; only restricts harmonic search, does not set pixel scale",
+  "reference_evaluation": {
+    "column_offsets_s": [
+      0
+    ],
+    "max_lag_s": 0.75,
+    "lag_reason": "Allows leading calibration pulse/margin cropping; no time stretching"
+  }
+}
