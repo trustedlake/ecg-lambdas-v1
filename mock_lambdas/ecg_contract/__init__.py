@@ -86,19 +86,19 @@ ERRORS = {
 
 WARNINGS = {
     # Leitura
-    "AMBIGUOUS_TRACE": "O traçado contém regiões ambíguas que exigem revisão humana.",
-    "GRID_CALIBRATION_UNCERTAIN": "Calibração da grade não confirmada.",
-    "GEOMETRY_FALLBACK": "Geometria estimada por método de contingência.",
-    "ORIENTATION_UNCERTAIN": "A orientação da imagem não pôde ser confirmada.",
-    "METHODS_PARTIAL_RESULT": "Alguns métodos não produziram sinais; confira os status individuais.",
-    "LEAD_PARTIAL_TRACE": "Traçado extraído parcialmente; trechos sem leitura vêm como null.",
-    "LEAD_SATURATED": "Traçado encosta na derivação vizinha; amplitudes podem estar cortadas.",
-    "IMAGE_ROTATION_CORRECTED": "A imagem estava inclinada e foi alinhada automaticamente.",
-    "CALIBRATION_PULSE_NOT_FOUND": "Pulso de calibração não encontrado; usada a calibração informada.",
+    "AMBIGUOUS_TRACE": "The trace has ambiguous regions that need human review.",
+    "GRID_CALIBRATION_UNCERTAIN": "Grid calibration not confirmed.",
+    "GEOMETRY_FALLBACK": "Geometry estimated by a fallback method.",
+    "ORIENTATION_UNCERTAIN": "Image orientation could not be confirmed.",
+    "METHODS_PARTIAL_RESULT": "Some methods produced no signals; check the individual statuses.",
+    "LEAD_PARTIAL_TRACE": "Trace only partially extracted; unread stretches are returned as null.",
+    "LEAD_SATURATED": "Trace touches the neighboring lead; amplitudes may be clipped.",
+    "IMAGE_ROTATION_CORRECTED": "The image was tilted and was aligned automatically.",
+    "CALIBRATION_PULSE_NOT_FOUND": "Calibration pulse not found; the provided calibration was used.",
     # Interpretação
-    "LEAD_MISSING": "Derivação ausente no sinal; critérios que dependem dela foram omitidos.",
-    "LEAD_LOW_QUALITY": "Derivação com qualidade baixa; medidas nela são menos confiáveis.",
-    "MEASUREMENT_UNRELIABLE": "Medida calculada com baixa confiança.",
+    "LEAD_MISSING": "Lead missing from the signal; criteria that depend on it were skipped.",
+    "LEAD_LOW_QUALITY": "Low-quality lead; measurements on it are less reliable.",
+    "MEASUREMENT_UNRELIABLE": "Measurement computed with low confidence.",
 }
 
 READ_FAILURE_CODES = ("READ_GRID_NOT_FOUND", "READ_TRACE_EXTRACTION_FAILED", "STORAGE_ERROR", "INTERNAL_ERROR")
