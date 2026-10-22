@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "id": "report_abnormal",
+  "description": "Abnormal heartbeat_ECG Images",
+  "max_side": 2400,
+  "minor_square_mm": 1,
+  "leads": [
+    [
+      "I",
+      "aVR",
+      "V1",
+      "V4"
+    ],
+    [
+      "II",
+      "aVL",
+      "V2",
+      "V5"
+    ],
+    [
+      "III",
+      "aVF",
+      "V3",
+      "V6"
+    ]
+  ],
+  "rhythm_leads": [
+    "II_longo"
+  ],
+  "baseline_fractions": [
+    0.14,
+    0.39,
+    0.635,
+    0.88
+  ],
+  "paper_baseline_fractions": [
+    0.295,
+    0.49,
+    0.68,
+    0.87
+  ],
+  "signal_x_fraction": [
+    0.035,
+    0.977
+  ],
+  "label_exclusion_fraction": 0.008,
+  "calibration": {
+    "speed_mm_s": 25,
+    "gain_mm_mv": 10,
+    "speed_source": "Read manually from printed training examples; not inferred by software",
+    "gain_source": "Read manually from printed training examples; not inferred by software"
+  },
+  "calibration_scope": "Folder assumption from inspected training examples; individual exceptions must be explicit variants",
+  "review": {
+    "enabled_leads": null,
+    "excluded_intervals": []
+  },
+  "major_interval_minor_squares": 5,
+  "grid_width_mm_hint": 265,
+  "grid_width_hint_source": "Approximate grid extent from training layout; only restricts harmonic search, does not set pixel scale"
+}
