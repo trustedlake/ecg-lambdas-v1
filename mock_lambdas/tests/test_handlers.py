@@ -17,6 +17,7 @@ from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "interpretation"))  # diagnoser.py sits next to the handler
 os.environ.setdefault("RESULTS_BUCKET", "results-test")
 os.environ.pop("MOCK_SCENARIO", None)
 
@@ -76,7 +77,7 @@ class InterpretationTests(unittest.TestCase):
         self.assertIsNone(response["result"])
 
     def test_success_summary_and_details(self):
-        response = self.call()
+        response = self.call(mock={"scenario": "success"})
         self.assertEqual(response["status"], "OK", response["warnings"])
         summary, details = response["result"]["summary"], response["result"]["details"]
         self.assertEqual(summary["classification"], "normal")
@@ -87,11 +88,21 @@ class InterpretationTests(unittest.TestCase):
         self.assertTrue(response["result"]["disclaimer"])
 
     def test_sex_changes_thresholds(self):
-        female = self.call(patient={"sex": "F"})["result"]["details"]["criteria"]
-        male = self.call(patient={"sex": "M"})["result"]["details"]["criteria"]
+        female = self.call(patient={"sex": "F"}, mock={"scenario": "success"})["result"]["details"]["criteria"]
+        male = self.call(patient={"sex": "M"}, mock={"scenario": "success"})["result"]["details"]["criteria"]
         self.assertIn("feminino", female[0]["reference"])
         self.assertIn("450", male[0]["reference"])
         self.assertNotEqual(female[1]["reference"], male[1]["reference"])
+
+    def test_real_diagnoser_path(self):
+        response = self.call()
+        self.assertIn(response["status"], ("OK", "OK_WITH_WARNINGS"), response)
+        result = response["result"]
+        self.assertTrue(70 <= result["summary"]["heart_rate_bpm"] <= 74)
+        codes = {f["code"] for f in result["details"]["findings"]}
+        self.assertFalse(codes & {"ST_ELEVATION", "ST_DEPRESSION", "PATHOLOGICAL_Q", "RBBB_PATTERN", "LBBB_PATTERN"})
+        self.assertIsNone(result["details"]["measurements"]["pr_ms"]["value"])
+        self.assertTrue(result["disclaimer"])
 
     def test_success_with_warnings(self):
         response = self.call(mock={"scenario": "success_with_warnings"})

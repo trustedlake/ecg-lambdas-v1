@@ -12,6 +12,7 @@ import logging
 import math
 import os
 
+import diagnoser
 from ecg_contract import (
     INTERP_FAILURE_CODES, SCENARIO_FAILURE, SCENARIO_SUCCESS, SCENARIO_WARNINGS,
     STANDARD_LEADS, ContractError, Envelope, resolve_mock, validate_common, warning,
@@ -33,8 +34,8 @@ QTC_LIMIT_MS = {"F": 460, "M": 450}
 CORNELL_LIMIT_MV = {"F": 2.0, "M": 2.8}
 SOKOLOW_LIMIT_MV = 3.5
 FIXED_INTERVALS_MS = {"pr_ms": 160, "qrs_ms": 92, "qt_ms": 380}
-DISCLAIMER = ("Resultado gerado automaticamente a partir do sinal extraído. "
-              "Não substitui a avaliação e o laudo de um médico.")
+DISCLAIMER = ("Generated automatically from the extracted signal. "
+              "It is a screening aid and does not replace a doctor's assessment or report.")
 
 
 def handler(event, context):
@@ -48,7 +49,10 @@ def handler(event, context):
         rate, leads = _validate_signal(event.get("signal"))
         if scenario == SCENARIO_FAILURE:
             raise ContractError(code or "INTERP_NO_QRS_DETECTED")
-        result, warnings = _interpret(sex, rate, leads, degraded=scenario == SCENARIO_WARNINGS)
+        if event.get("mock") is None and not os.environ.get("MOCK_SCENARIO"):
+            result, warnings = _diagnose(sex, rate, leads)
+        else:
+            result, warnings = _interpret(sex, rate, leads, degraded=scenario == SCENARIO_WARNINGS)
         response = env.success(result, warnings)
     except ContractError as exc:
         logger.info("interpret %s: %s", env.request_id, exc)
@@ -104,6 +108,21 @@ def _validate_signal(signal):
         if sum(v is not None for v in samples) < rate:
             raise ContractError("SIGNAL_TOO_SHORT", details={"lead": name, "valid_samples": sum(v is not None for v in samples)})
     return float(rate), leads
+
+
+# ─── Interpretação real (regras AHA/ACCF/HRS, ver diagnoser.py) ──────────────
+
+def _diagnose(sex, rate, leads):
+    present = {lead["name"] for lead in leads}
+    warnings = [warning("LEAD_MISSING", lead=name) for name in STANDARD_LEADS if name not in present]
+    try:
+        summary, details, extra = diagnoser.diagnose(sex, rate, leads)
+    except diagnoser.NoQrs:
+        raise ContractError("INTERP_NO_QRS_DETECTED")
+    except diagnoser.TooNoisy:
+        raise ContractError("INTERP_SIGNAL_TOO_NOISY")
+    warnings += [warning(w["code"], **{k: v for k, v in w.items() if k != "code"}) for w in extra]
+    return {"patient": {"sex": sex}, "summary": summary, "details": details, "disclaimer": DISCLAIMER}, warnings
 
 
 # ─── Interpretação (mock) ─────────────────────────────────────────────────────
