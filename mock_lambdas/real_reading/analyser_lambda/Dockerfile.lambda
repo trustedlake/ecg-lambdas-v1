@@ -1,0 +1,9 @@
+FROM public.ecr.aws/lambda/python:3.12
+RUN dnf install -y mesa-libGL dejavu-sans-fonts && dnf clean all
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt boto3
+COPY ecg ${LAMBDA_TASK_ROOT}/ecg
+COPY review ${LAMBDA_TASK_ROOT}/review
+COPY configs ${LAMBDA_TASK_ROOT}/configs
+COPY lambda_handler.py ${LAMBDA_TASK_ROOT}/
+CMD ["lambda_handler.handler"]
