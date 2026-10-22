@@ -26,6 +26,7 @@ CORNELL_MV = {"F": 2.0, "M": 2.8}
 RVH_MV = 1.05
 HR_LOW, HR_HIGH, PAUSE_S = 50, 100, 2.0
 NAN = float("nan")
+MAX_BRIDGED_GAP_S = 0.02   # gaps up to 20 ms are bridged for QRS measurement only
 EXPERIMENTAL = False
 
 
@@ -44,6 +45,27 @@ def _median(values):
 def _clean(samples):
     """None -> NaN so gaps are never bridged."""
     return [NAN if v is None else float(v) for v in samples]
+
+
+def _bridge_short_gaps(x, max_len):
+    """Linear fill of interior gaps up to max_len samples, for QRS measurement only.
+
+    The extractor often loses a few pixels on the steep R stroke; without this, a 5 ms hole drops the whole beat.
+    Coverage is still computed on the raw samples, so the gaps stay visible in the quality figures."""
+    x, n, i = list(x), len(x), 0
+    while i < n:
+        if not math.isnan(x[i]):
+            i += 1
+            continue
+        j = i
+        while j < n and math.isnan(x[j]):
+            j += 1
+        if i > 0 and j < n and j - i <= max_len:
+            a, b = x[i - 1], x[j]
+            for t in range(i, j):
+                x[t] = a + (b - a) * (t - i + 1) / (j - i + 1)
+        i = j
+    return x
 
 
 def _has_gap(x, a, b):
@@ -165,6 +187,7 @@ def analyse_lead(name, samples, fs):
     info = {"name": name, "coverage": len(valid) / len(x) if x else 0, "beats": []}
     if len(valid) < fs:
         return info
+    x = _bridge_short_gaps(x, max(int(MAX_BRIDGED_GAP_S * fs), 1))
     for p in detect_beats(x, fs):
         bounds = _qrs_bounds(x, p, fs)
         if not bounds:
