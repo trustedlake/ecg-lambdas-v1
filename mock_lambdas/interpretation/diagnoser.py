@@ -445,11 +445,13 @@ def diagnose(sex, fs, leads):
             continue
         i = infos[name]
         ok = i["coverage"] >= 0.8 and len(i["beats"]) >= 1
+        reason = None if ok else (f"Only {round(i['coverage'] * 100)}% of the trace was extracted (needs 80%)"
+                                  if i["coverage"] < 0.8 else "No heartbeat passed the shape checks in this lead")
         if not ok:
             warnings.append({"code": "LEAD_LOW_QUALITY", "lead": name})
         per_lead.append({"name": name, "r_amplitude_mv": None if r_amp.get(name) is None else round(r_amp[name], 3),
                          "s_amplitude_mv": None if s_amp.get(name) is None else round(s_amp[name], 3),
-                         "quality": "good" if ok else "low",
+                         "quality": "good" if ok else "low", "quality_reason": reason,
                          "estimated": any(b["bridged"] for b in i["beats"])})
 
     abnormal = [f for f in findings if f["severity"] != "info"]
