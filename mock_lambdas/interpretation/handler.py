@@ -123,11 +123,11 @@ def _diagnose(sex, rate, leads, signal=None):
         raise ContractError("INTERP_SIGNAL_TOO_NOISY")
     warnings += [warning(w["code"], **{k: v for k, v in w.items() if k != "code"}) for w in extra]
     for finding in details.get("findings", []):
-        mark = finding.get("mark")
-        if mark and signal and signal.get("image_size_px"):
-            for key in ("image_size_px", "overlay_offset_px", "overlay_size_px"):
-                if signal.get(key):
-                    mark[key] = signal[key]
+        for mark in [finding.get("mark")] + (finding.get("marks") or []):
+            if mark and signal and signal.get("image_size_px"):
+                for key in ("image_size_px", "overlay_offset_px", "overlay_size_px"):
+                    if signal.get(key):
+                        mark[key] = signal[key]
     return {"patient": {"sex": sex}, "summary": summary, "details": details, "disclaimer": DISCLAIMER}, warnings
 
 

@@ -230,7 +230,7 @@ def analyse_lead(name, samples, fs, px=None):
         ref = sum(pre) / len(pre)
         j60 = off + int(0.06 * fs)
         stv = [v for v in x[max(j60 - int(0.01 * fs), 0):j60 + int(0.01 * fs) + 1] if not math.isnan(v)]
-        r, s = max(seg) - ref, ref - min(seg)
+        r, s = max(max(seg) - ref, 0.0), max(ref - min(seg), 0.0)
         rel = [v - ref for v in x[on:p + 1]]
         q_ms = q_mv = 0.0
         if x[p] >= ref and rel and min(rel) < -0.02:      # negative start before an upright R
@@ -356,11 +356,12 @@ def diagnose(sex, fs, leads):
 
     # Rate and rhythm: longest strip (lead II preferred on ties).
     longest = max(leads, key=lambda l: (sum(v is not None for v in l["samples"]), l["name"] == "II"))
-    x = _bridge_short_gaps(_clean(longest["samples"]), max(int(MAX_BRIDGED_GAP_S * fs), 1))
+    raw = _clean(longest["samples"])
+    x = _bridge_short_gaps(raw, max(int(MAX_BRIDGED_GAP_S * fs), 1))
     peaks = detect_beats(x, fs)
     spans = [(a, b) for a, b in zip(peaks, peaks[1:]) if not _has_gap(x, a, b)]
     rr = [(b - a) / fs for a, b in spans]
-    rinfo = {"name": longest["name"], "raw": x, "px": _lead_px(longest)}
+    rinfo = {"name": longest["name"], "raw": raw, "x": x, "px": _lead_px(longest)}
     if not rr:
         raise NoQrs()
     hr = round(60 / _median(rr))
