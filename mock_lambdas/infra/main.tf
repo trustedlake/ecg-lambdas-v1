@@ -15,14 +15,14 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "ecg-lambdas-terraform-state"
+    bucket = "ecg-terraform-state-785236377332-us-east-1"
     key    = "ecg-mock-lambdas/terraform.tfstate"
-    region = "sa-east-1"
+    region = "us-east-1"
   }
 }
 
 provider "aws" {
-  region  = "sa-east-1"
+  region  = var.region
   profile = var.aws_profile
 
   default_tags {
@@ -62,7 +62,7 @@ data "archive_file" "package" {
 
 resource "aws_iam_role" "this" {
   for_each = local.functions
-  name     = "${each.value.name}-role"
+  name     = "${each.value.name}-role-${var.region}"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -114,7 +114,7 @@ data "aws_ecr_repository" "analyser" {
 }
 
 resource "aws_iam_role" "reading_real" {
-  name = "ecg-reading-role"
+  name = "ecg-reading-role-${var.region}"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{

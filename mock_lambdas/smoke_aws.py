@@ -17,7 +17,7 @@ import uuid
 import boto3
 from botocore.config import Config
 
-IMAGES_BUCKET = "ecg-lambdas-images-785236377332-sa-east-1"
+IMAGES_BUCKET = "ecg-lambdas-images-785236377332-us-east-1"
 READING, INTERPRETATION = "ecg-reading", "ecg-interpretation"
 
 
@@ -25,7 +25,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", help="ECG photo (JPG/PNG); without it a synthetic image is used")
     parser.add_argument("--profile", default="trustedlake")
-    parser.add_argument("--region", default="sa-east-1")
+    parser.add_argument("--region", default="us-east-1")
     args = parser.parse_args()
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)

@@ -1,3 +1,8 @@
+variable "region" {
+  type    = string
+  default = "us-east-1"
+}
+
 variable "aws_profile" {
   type        = string
   description = "Local AWS profile (~/.aws/credentials) used by the provider."
@@ -7,13 +12,13 @@ variable "aws_profile" {
 variable "images_bucket" {
   type        = string
   description = "Bucket (existing) where the app uploads the ECG photos."
-  default     = "ecg-lambdas-images-785236377332-sa-east-1"
+  default     = "ecg-lambdas-images-785236377332-us-east-1"
 }
 
 variable "results_bucket" {
   type        = string
   description = "Bucket (existing) where the reading writes the overlay and signal."
-  default     = "ecg-lambdas-results-785236377332-sa-east-1"
+  default     = "ecg-lambdas-results-785236377332-us-east-1"
 }
 
 variable "code_version" {
@@ -36,5 +41,5 @@ variable "mock_scenario" {
 variable "reading_image_tag" {
   type        = string
   description = "Tag of the real reading image in the ECR repo ecg-analyser."
-  default     = "v7-traced-fallback"
+  default     = "v6-quiet"
 }

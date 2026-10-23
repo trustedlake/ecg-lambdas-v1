@@ -64,7 +64,7 @@ Format of `error`:
 {
   "contract_version": "1.0",
   "request_id": "3f6c1f9e-8f0a-4c1e-9a52-0d2b7e0b6a11",
-  "image": {"bucket": "ecg-lambdas-images-785236377332-sa-east-1", "key": "<user>/<ts>/<exam>/<attempt>/original.jpg"},
+  "image": {"bucket": "ecg-lambdas-images-785236377332-us-east-1", "key": "<user>/<ts>/<exam>/<attempt>/original.jpg"},
   "layout": "3x4+1",
   "calibration": {"speed_mm_s": 25, "gain_mm_mv": 10},
   "mock": {"scenario": "refused", "code": "READ_REFUSED_BLURRY"}
