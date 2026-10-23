@@ -1,10 +1,10 @@
-"""Lambda de interpretação de ECG (contrato v1, operation=interpret).
+"""ECG interpretation lambda (contract v1, operation=interpret).
 
-Valida sinal e sexo do paciente de verdade. A frequência cardíaca e as
-amplitudes saem do sinal recebido (detecção simples de picos R); os demais
-intervalos são fixos. Os limiares dependentes do sexo (QTc, Cornell) são
-aplicados conforme o paciente. Não substitui laudo médico. Sem dependências
-além da stdlib. Ver CONTRATO_LAMBDAS.md.
+Really validates the signal and the patient sex. Heart rate and amplitudes
+come from the received signal (simple R-peak detection); the remaining
+intervals are fixed. Sex-dependent thresholds (QTc, Cornell) are applied
+according to the patient. Does not replace a medical report. No dependencies
+beyond the stdlib. See LAMBDA_CONTRACT.md.
 """
 
 import json
@@ -29,7 +29,7 @@ MAX_SECONDS_PER_LEAD = 60
 SCENARIOS = (SCENARIO_SUCCESS, SCENARIO_WARNINGS, SCENARIO_FAILURE)
 SCENARIO_CODES = {SCENARIO_FAILURE: INTERP_FAILURE_CODES}
 
-# Limiares por sexo (critérios clássicos; valores de referência do mock).
+# Thresholds by sex (classic criteria; mock reference values).
 QTC_LIMIT_MS = {"F": 460, "M": 450}
 CORNELL_LIMIT_MV = {"F": 2.0, "M": 2.8}
 SOKOLOW_LIMIT_MV = 3.5
@@ -50,15 +50,15 @@ def handler(event, context):
         if scenario == SCENARIO_FAILURE:
             raise ContractError(code or "INTERP_NO_QRS_DETECTED")
         if event.get("mock") is None and not os.environ.get("MOCK_SCENARIO"):
-            result, warnings = _diagnose(sex, rate, leads)
+            result, warnings = _diagnose(sex, rate, leads, event.get("signal") or {}, _patient_age(event.get("patient")))
         else:
             result, warnings = _interpret(sex, rate, leads, degraded=scenario == SCENARIO_WARNINGS)
         response = env.success(result, warnings)
     except ContractError as exc:
         logger.info("interpret %s: %s", env.request_id, exc)
         response = env.failure(exc)
-    except Exception:  # nunca vazar FunctionError para o backend
-        logger.exception("interpret %s: erro inesperado", env.request_id)
+    except Exception:  # never leak a FunctionError to the backend
+        logger.exception("interpret %s: unexpected error", env.request_id)
         response = env.failure(ContractError("INTERNAL_ERROR"))
     logger.info(json.dumps({"request_id": response["request_id"], "status": response["status"],
                             "error": (response["error"] or {}).get("code"),
@@ -66,7 +66,7 @@ def handler(event, context):
     return response
 
 
-# ─── Validação ────────────────────────────────────────────────────────────────
+# ─── Validation ────────────────────────────────────────────────────────────────
 
 def _validate_patient(patient):
     sex = patient.get("sex") if isinstance(patient, dict) else None
@@ -77,6 +77,12 @@ def _validate_patient(patient):
     return sex
 
 
+def _patient_age(patient):
+    """Optional patient.age_years; anything that is not a plausible age is ignored (treated as unknown)."""
+    age = patient.get("age_years") if isinstance(patient, dict) else None
+    return age if _is_number(age) and 0 <= age <= 130 else None
+
+
 def _is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
@@ -85,47 +91,54 @@ def _validate_signal(signal):
     if signal is None:
         raise ContractError("SIGNAL_MISSING")
     if not isinstance(signal, dict):
-        raise ContractError("SIGNAL_INVALID", details={"reason": "signal deve ser um objeto"})
+        raise ContractError("SIGNAL_INVALID", details={"reason": "signal must be an object"})
     rate = signal.get("sampling_rate_hz")
     if not _is_number(rate) or not MIN_RATE_HZ <= rate <= MAX_RATE_HZ:
         raise ContractError("SIGNAL_SAMPLING_RATE_INVALID", details={"received": rate})
     if signal.get("units", "mV") != "mV":
-        raise ContractError("SIGNAL_INVALID", details={"reason": "units deve ser \"mV\""})
+        raise ContractError("SIGNAL_INVALID", details={"reason": "units must be \"mV\""})
     leads = signal.get("leads")
     if not isinstance(leads, list) or not leads:
         raise ContractError("SIGNAL_MISSING")
     for index, lead in enumerate(leads):
         if not isinstance(lead, dict):
-            raise ContractError("SIGNAL_INVALID", details={"lead_index": index, "reason": "derivação deve ser objeto"})
+            raise ContractError("SIGNAL_INVALID", details={"lead_index": index, "reason": "lead must be an object"})
         name, samples = lead.get("name"), lead.get("samples")
         if name not in STANDARD_LEADS:
             raise ContractError("SIGNAL_LEAD_UNKNOWN", details={"lead_index": index, "received": name,
                                                                 "allowed": list(STANDARD_LEADS)})
         if not isinstance(samples, list) or not all(v is None or _is_number(v) for v in samples):
-            raise ContractError("SIGNAL_INVALID", details={"lead": name, "reason": "samples deve ser lista de números ou null"})
+            raise ContractError("SIGNAL_INVALID", details={"lead": name, "reason": "samples must be a list of numbers or null"})
         if len(samples) > MAX_SECONDS_PER_LEAD * rate:
-            raise ContractError("SIGNAL_INVALID", details={"lead": name, "reason": f"máximo {MAX_SECONDS_PER_LEAD} s por derivação"})
+            raise ContractError("SIGNAL_INVALID", details={"lead": name, "reason": f"maximum {MAX_SECONDS_PER_LEAD} s per lead"})
         if sum(v is not None for v in samples) < rate:
             raise ContractError("SIGNAL_TOO_SHORT", details={"lead": name, "valid_samples": sum(v is not None for v in samples)})
     return float(rate), leads
 
 
-# ─── Interpretação real (regras publicadas, ver diagnoser.py) ──────────────
+# ─── Real interpretation (published rules, see diagnoser.py) ──────────────
 
-def _diagnose(sex, rate, leads):
+def _diagnose(sex, rate, leads, signal=None, age=None):
     present = {lead["name"] for lead in leads}
     warnings = [warning("LEAD_MISSING", lead=name) for name in STANDARD_LEADS if name not in present]
     try:
-        summary, details, extra = diagnoser.diagnose(sex, rate, leads)
+        summary, details, extra = diagnoser.diagnose(sex, rate, leads, age)
     except diagnoser.NoQrs:
         raise ContractError("INTERP_NO_QRS_DETECTED")
     except diagnoser.TooNoisy:
         raise ContractError("INTERP_SIGNAL_TOO_NOISY")
     warnings += [warning(w["code"], **{k: v for k, v in w.items() if k != "code"}) for w in extra]
-    return {"patient": {"sex": sex}, "summary": summary, "details": details, "disclaimer": DISCLAIMER}, warnings
+    for finding in details.get("findings", []):
+        for mark in [finding.get("mark")] + (finding.get("marks") or []):
+            if mark and signal and signal.get("image_size_px"):
+                for key in ("image_size_px", "overlay_offset_px", "overlay_size_px"):
+                    if signal.get(key):
+                        mark[key] = signal[key]
+    patient = {"sex": sex, **({"age_years": age} if age is not None else {})}
+    return {"patient": patient, "summary": summary, "details": details, "disclaimer": DISCLAIMER}, warnings
 
 
-# ─── Interpretação (mock) ─────────────────────────────────────────────────────
+# ─── Interpretation (mock) ─────────────────────────────────────────────────────
 
 def _r_peaks(samples, rate):
     values = [v for v in samples if v is not None]
@@ -146,7 +159,7 @@ def _r_peaks(samples, rate):
 
 
 def _heart_rate(leads, rate):
-    # A derivação mais longa (normalmente a tira de ritmo) dá a melhor estimativa.
+    # The longest lead (normally the rhythm strip) gives the best estimate.
     for lead in sorted(leads, key=lambda lead: (-len(lead["samples"]), lead["name"] != "II")):
         peaks = _r_peaks(lead["samples"], rate)
         if len(peaks) >= 2:
@@ -171,7 +184,7 @@ def _criterion(name, value, unit, limit, op, sex_specific, sex, available=True):
         return {"name": name, "value": None, "unit": unit, "reference": f"{op} {limit} {unit}",
                 "sex_specific": sex_specific, "status": "not_evaluated"}
     abnormal = value > limit
-    reference = f"≤ {limit} {unit}" + (f" ({'feminino' if sex == 'F' else 'masculino'})" if sex_specific else "")
+    reference = f"≤ {limit} {unit}" + (f" ({'female' if sex == 'F' else 'male'})" if sex_specific else "")
     return {"name": name, "value": value, "unit": unit, "reference": reference,
             "sex_specific": sex_specific, "status": "abnormal" if abnormal else "normal"}
 
@@ -188,7 +201,7 @@ def _interpret(sex, rate, leads, degraded):
         low = "V2" if "V2" in per_lead else next(iter(per_lead))
         per_lead[low]["quality"] = "low"
         warnings.append(warning("LEAD_LOW_QUALITY", lead=low))
-        warnings.append(warning("MEASUREMENT_UNRELIABLE", message="Intervalo QT medido com baixa confiança (onda T achatada)."))
+        warnings.append(warning("MEASUREMENT_UNRELIABLE", message="QT interval measured with low confidence (flattened T wave)."))
         confidence["qt_ms"] = confidence["qtc_ms"] = "low"
 
     def amp(name, field):
@@ -206,31 +219,31 @@ def _interpret(sex, rate, leads, degraded):
 
     findings = []
     if hr < 60:
-        findings.append(("SINUS_BRADYCARDIA", "Bradicardia sinusal", "warning", f"FC {hr} bpm (< 60)"))
+        findings.append(("SINUS_BRADYCARDIA", "Sinus bradycardia", "warning", f"HR {hr} bpm (< 60)"))
     elif hr > 100:
-        findings.append(("SINUS_TACHYCARDIA", "Taquicardia sinusal", "warning", f"FC {hr} bpm (> 100)"))
+        findings.append(("SINUS_TACHYCARDIA", "Sinus tachycardia", "warning", f"HR {hr} bpm (> 100)"))
     else:
-        findings.append(("SINUS_RHYTHM", "Ritmo sinusal", "info", f"FC {hr} bpm, RR regular"))
+        findings.append(("SINUS_RHYTHM", "Sinus rhythm", "info", f"HR {hr} bpm, RR regular"))
     net_i = (amp("I", "r_amplitude_mv") or 0) - (amp("I", "s_amplitude_mv") or 0)
     net_avf = (amp("aVF", "r_amplitude_mv") or 0) - (amp("aVF", "s_amplitude_mv") or 0)
     if "I" in per_lead and "aVF" in per_lead:
         if net_i > 0 and net_avf > 0:
-            findings.append(("NORMAL_AXIS", "Eixo elétrico normal", "info", "QRS predominantemente positivo em I e aVF"))
+            findings.append(("NORMAL_AXIS", "Normal electrical axis", "info", "QRS predominantly positive in I and aVF"))
         else:
-            findings.append(("AXIS_DEVIATION", "Desvio do eixo elétrico", "warning",
-                             f"QRS líquido I {net_i:+.2f} mV, aVF {net_avf:+.2f} mV"))
+            findings.append(("AXIS_DEVIATION", "Electrical axis deviation", "warning",
+                             f"Net QRS I {net_i:+.2f} mV, aVF {net_avf:+.2f} mV"))
     if criteria[0]["status"] == "abnormal":
-        findings.append(("QTC_PROLONGED", "QTc prolongado", "warning", f"QTc {qtc} ms ({criteria[0]['reference']})"))
+        findings.append(("QTC_PROLONGED", "Prolonged QTc", "warning", f"QTc {qtc} ms ({criteria[0]['reference']})"))
     if any(c["status"] == "abnormal" for c in criteria[1:]):
-        findings.append(("LVH_VOLTAGE", "Critério de voltagem para sobrecarga ventricular esquerda", "warning",
-                         "Cornell e/ou Sokolow-Lyon acima do limite"))
+        findings.append(("LVH_VOLTAGE", "Voltage criterion for left ventricular hypertrophy", "warning",
+                         "Cornell and/or Sokolow-Lyon above the limit"))
     findings = [{"code": c, "label": label, "severity": sev, "evidence": ev} for c, label, sev, ev in findings]
 
     abnormal = [f for f in findings if f["severity"] != "info"]
     classification = "abnormal" if abnormal else ("borderline" if degraded else "normal")
-    headline = {"normal": "ECG dentro dos limites da normalidade",
-                "borderline": "ECG sem alterações relevantes, com medidas de baixa confiança",
-                "abnormal": "ECG com alterações; revisar achados"}[classification]
+    headline = {"normal": "ECG within normal limits",
+                "borderline": "ECG without relevant changes, with low-confidence measurements",
+                "abnormal": "ECG with abnormalities; review findings"}[classification]
     rhythm = findings[0]["label"]
     summary = {
         "classification": classification,
@@ -238,7 +251,7 @@ def _interpret(sex, rate, leads, degraded):
         "rhythm": rhythm,
         "heart_rate_bpm": hr,
         "key_findings": [f["label"] for f in findings],
-        "text": f"{rhythm}, FC {hr} bpm, QTc {qtc} ms. {headline}.",
+        "text": f"{rhythm}, HR {hr} bpm, QTc {qtc} ms. {headline}.",
     }
     details = {
         "measurements": {

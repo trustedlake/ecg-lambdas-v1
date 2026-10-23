@@ -10,11 +10,15 @@ def font(size):
     return ImageFont.load_default()
 
 
+def overlay_geometry(w,h):
+    scale=w/1800.;pad=max(14,int(22*scale));header=max(86,int(106*scale));footer=max(58,int(70*scale))
+    return [pad,header],[w+2*pad,h+header+footer]
+
 def render(a,leads,traces,grid,config,status):
     h,w=a.shape[:2];scale=w/1800.;pad=max(14,int(22*scale));header=max(86,int(106*scale));footer=max(58,int(70*scale))
     canvas=Image.new('RGB',(w+2*pad,h+header+footer),'#eef3f7')
     d=ImageDraw.Draw(canvas)
-    d.text((pad,12*scale),'ECG | Derivações e calibração',font=font(max(22,int(30*scale))),fill='#17344c')
+    d.text((pad,12*scale),'ECG | Leads and calibration',font=font(max(22,int(30*scale))),fill='#17344c')
     cal=config['calibration'];label=f"{config['layout_label']}  |  {cal['speed_mm_s']} mm/s  |  {cal['gain_mm_mv']} mm/mV"
     d.text((pad,max(48,52*scale)),label,font=font(max(14,int(19*scale))),fill='#425d73')
     base=Image.fromarray(a).convert('RGBA');layer=Image.new('RGBA',base.size);g=ImageDraw.Draw(layer)
@@ -37,7 +41,7 @@ def render(a,leads,traces,grid,config,status):
         pixels[y:y+mh,x:x+mw][trace['mask']]=color
     base=Image.fromarray(pixels);d=ImageDraw.Draw(base);fs=max(22,int(38*scale))
     for lead,trace in zip(leads,traces):
-        x0,y0,x1,y1=lead['box'];color=lead['color'];name=lead['name'].replace('_longo',' longo')
+        x0,y0,x1,y1=lead['box'];color=lead['color'];name=lead['name'].replace('_longo',' rhythm')
         d.rectangle((x0,y0,x1-1,y1-1),outline=color,width=max(3,int(3*scale)))
         box=d.textbbox((0,0),name,font=font(fs));tw=box[2]+14;th=fs+12
         d.rounded_rectangle((x0+3,y0+3,x0+tw,y0+th),radius=4,fill='white',outline=color)
@@ -53,7 +57,7 @@ def render(a,leads,traces,grid,config,status):
         sx,sy=tb[2]/2,ty-6;n=max(2,int(((ex-sx)**2+(ey-sy)**2)**.5//(8*scale+6)))
         for i in range(0,n,2):d.line((sx+(ex-sx)*i/n,sy+(ey-sy)*i/n,sx+(ex-sx)*(i+1)/n,sy+(ey-sy)*(i+1)/n),fill=purple,width=t)
     canvas.paste(base,(pad,header));d=ImageDraw.Draw(canvas)
-    label='Grade: estimativa consistente' if grid['valid'] else 'Grade: calibração pendente - arrays físicos indisponíveis'
+    label='Grid: consistent estimate' if grid['valid'] else 'Grid: calibration pending - physical arrays unavailable'
     d.text((pad,header+h+8),label,font=font(max(12,int(17*scale))),fill='#28546c' if grid['valid'] else '#a35b1a')
-    d.text((pad,header+h+max(34,32*scale)),'Traçado aproximado por contraste | Lacunas preservadas | '+status,font=font(max(11,int(15*scale))),fill='#536879')
+    d.text((pad,header+h+max(34,32*scale)),'Trace approximated by contrast | Gaps preserved | '+status,font=font(max(11,int(15*scale))),fill='#536879')
     return canvas

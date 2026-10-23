@@ -1,4 +1,4 @@
-"""Testes do contrato v1 das lambdas mock (sem AWS; S3 falso em memória).
+"""Tests of the v1 contract of the mock lambdas (no AWS; in-memory fake S3).
 
     pip install pillow boto3
     python -m unittest discover -s mock_lambdas/tests -v
@@ -17,7 +17,7 @@ from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "interpretation"))  # diagnoser.py sits next to the handler
+sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "interpretation"))  # diagnoser.py sits next to the handler
 os.environ.setdefault("RESULTS_BUCKET", "results-test")
 os.environ.pop("MOCK_SCENARIO", None)
 
@@ -25,7 +25,7 @@ from ecg_contract import ERRORS, LAYOUTS, WARNINGS  # noqa: E402
 
 
 def _load(name, filename="handler.py"):
-    spec = importlib.util.spec_from_file_location(f"{name}_handler", os.path.join(ROOT, name, filename))
+    spec = importlib.util.spec_from_file_location(f"{name}_handler", os.path.join(os.path.dirname(ROOT) if name == "interpretation" else ROOT, name, filename))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -82,7 +82,7 @@ class InterpretationTests(unittest.TestCase):
         summary, details = response["result"]["summary"], response["result"]["details"]
         self.assertEqual(summary["classification"], "normal")
         self.assertEqual(summary["heart_rate_bpm"], 72)
-        self.assertIn("Ritmo sinusal", summary["key_findings"])
+        self.assertIn("Sinus rhythm", summary["key_findings"])
         self.assertEqual(len(details["per_lead"]), 12)
         self.assertIn("NORMAL_AXIS", {f["code"] for f in details["findings"]})
         self.assertTrue(response["result"]["disclaimer"])
@@ -90,7 +90,7 @@ class InterpretationTests(unittest.TestCase):
     def test_sex_changes_thresholds(self):
         female = self.call(patient={"sex": "F"}, mock={"scenario": "success"})["result"]["details"]["criteria"]
         male = self.call(patient={"sex": "M"}, mock={"scenario": "success"})["result"]["details"]["criteria"]
-        self.assertIn("feminino", female[0]["reference"])
+        self.assertIn("female", female[0]["reference"])
         self.assertIn("450", male[0]["reference"])
         self.assertNotEqual(female[1]["reference"], male[1]["reference"])
 
@@ -103,6 +103,61 @@ class InterpretationTests(unittest.TestCase):
         self.assertFalse(codes & {"ST_ELEVATION", "ST_DEPRESSION", "PATHOLOGICAL_Q", "RBBB_PATTERN", "LBBB_PATTERN"})
         self.assertIsNone(result["details"]["measurements"]["pr_ms"]["value"])
         self.assertTrue(result["disclaimer"])
+        self.assertIn(result["summary"]["alert_level"], ("ok", "review"))
+        self.assertTrue(all(f["alert_level"] in ("ok", "review", "urgent") for f in result["details"]["findings"]))
+
+    def test_marked_tachycardia_is_urgent(self):
+        fast = {"sampling_rate_hz": 500, "leads": [{"name": "II", "samples": ([0.0] * 87 + [1.0] + [0.0] * 87) * 30}]}
+        result = self.call(signal=fast)["result"]
+        self.assertGreaterEqual(result["summary"]["heart_rate_bpm"], 150)
+        self.assertEqual(result["summary"]["alert_level"], "urgent")
+
+    def test_cornell_evidence_marks_both_leads(self):
+        def lead(name, r, s):
+            beat = [0.0] * 400
+            beat[190:198] = [r * 0.5, r, r * 0.5, -s * 0.5, -s, -s * 0.5, 0, 0]
+            return {"name": name, "samples": beat * 8}
+        names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+        signal = {"sampling_rate_hz": 500, "leads": [lead(n, 1.2 if n == "aVL" else 0.6, 1.4 if n == "V3" else 0.2) for n in names]}
+        result = self.call(signal=signal, patient={"sex": "F"})["result"]
+        finding = next(f for f in result["details"]["findings"] if f["code"] == "LVH_VOLTAGE")
+        self.assertEqual(len(finding["marks"]), 2)
+        checks = {c["code"]: c for c in result["details"]["checks"]}
+        self.assertEqual(checks["LVH_CORNELL"]["finding_codes"], ["LVH_VOLTAGE"])
+        self.assertEqual(checks["LVH_CORNELL"]["alert_level"], "review")
+        self.assertEqual(checks["LVH_SOKOLOW_LYON"]["finding_codes"], [])
+        self.assertTrue(any("aVL" in m["label"] for m in finding["marks"]) and any("V3" in m["label"] for m in finding["marks"]))
+
+    def test_v1_v3_st_limit_uses_patient_age(self):
+        def lead(name, st):
+            beat = [0.0] * 400
+            beat[190:198] = [0.5, 1.0, 0.5, -0.1, -0.2, -0.1, 0, 0]
+            beat[198:290] = [st] * 92
+            return {"name": name, "samples": beat * 8}
+        names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+        signal = {"sampling_rate_hz": 500, "leads": [lead(n, 0.22 if n in ("V1", "V2") else 0.0) for n in names]}
+
+        def st_codes(patient):
+            result = self.call(signal=signal, patient=patient)["result"]
+            return result["patient"], {f["code"] for f in result["details"]["findings"]}
+        patient, codes = st_codes({"sex": "M"})            # unknown age: 2.0 mm limit
+        self.assertIn("ST_ELEVATION", codes)
+        self.assertNotIn("age_years", patient)
+        patient, codes = st_codes({"sex": "M", "age_years": 30})   # under 40: 2.5 mm limit
+        self.assertNotIn("ST_ELEVATION", codes)
+        self.assertEqual(patient["age_years"], 30)
+        self.assertIn("ST_ELEVATION", st_codes({"sex": "M", "age_years": "thirty"})[1])   # implausible age ignored
+
+    def test_lvh_borderline_has_marks(self):
+        def lead(name, r, s):
+            beat = [0.0] * 400
+            beat[190:198] = [r * 0.5, r, r * 0.5, -s * 0.5, -s, -s * 0.5, 0, 0]
+            return {"name": name, "samples": beat * 8}
+        names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+        signal = {"sampling_rate_hz": 500, "leads": [lead(n, 1.0 if n == "aVL" else 0.6, 0.9 if n == "V3" else 0.2) for n in names]}
+        result = self.call(signal=signal, patient={"sex": "F"})["result"]
+        finding = next(f for f in result["details"]["findings"] if f["code"] == "LVH_VOLTAGE_BORDERLINE")
+        self.assertEqual(len(finding["marks"]), 2)
 
     def test_success_with_warnings(self):
         response = self.call(mock={"scenario": "success_with_warnings"})
@@ -124,12 +179,17 @@ class InterpretationTests(unittest.TestCase):
 
     def test_flat_signal_has_no_qrs(self):
         flat = {"sampling_rate_hz": 500, "leads": [{"name": "II", "samples": [0.0] * 1000}]}
-        self.assertError(self.call(signal=flat), "INTERP_NO_QRS_DETECTED")
+        result = self.call(signal=flat)["result"]
+        self.assertEqual(result["summary"]["alert_level"], "review")
+        checks = {c["code"]: c for c in result["details"]["checks"]}
+        self.assertEqual(checks["HEART_RATE"]["status"], "not_possible")
+        self.assertEqual(checks["QT_QTC"]["status"], "not_possible")
+        self.assertTrue(any(r.startswith("Could not check: Heart rate") for r in result["summary"]["alert_reasons"]))
 
     def test_validation_errors(self):
         cases = [
             ({"patient": None}, "SEX_MISSING"),
-            ({"patient": {"sex": "feminino"}}, "SEX_INVALID"),
+            ({"patient": {"sex": "female"}}, "SEX_INVALID"),
             ({"signal": None}, "SIGNAL_MISSING"),
             ({"signal": "x"}, "SIGNAL_INVALID"),
             ({"signal": {"sampling_rate_hz": 500, "leads": []}}, "SIGNAL_MISSING"),
@@ -153,10 +213,26 @@ class CatalogTests(unittest.TestCase):
             self.assertTrue(message)
 
     def test_contract_doc_lists_every_code(self):
-        doc = open(os.path.join(os.path.dirname(ROOT), "CONTRATO_LAMBDAS.md"), encoding="utf-8").read()
+        doc = open(os.path.join(os.path.dirname(ROOT), "LAMBDA_CONTRACT.md"), encoding="utf-8").read()
         missing = [code for code in [*ERRORS, *WARNINGS] if f"`{code}`" not in doc]
-        self.assertEqual(missing, [], "códigos ausentes em CONTRATO_LAMBDAS.md")
+        self.assertEqual(missing, [], "codes missing from LAMBDA_CONTRACT.md")
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRhythmDoubleDetection(unittest.TestCase):
+    def test_wide_t_wave_next_to_qrs_is_not_a_second_beat(self):
+        import math
+        import diagnoser
+        fs, n = 200, 2000
+        x = [0.0] * n
+        for k in range(15):
+            i = int((0.3 + k * 0.63) * fs)
+            x[i], x[i + 1] = -0.3, 0.26
+            for j in range(int(0.2 * fs)):
+                x[i + int(0.12 * fs) + j] -= 0.35 * math.sin(math.pi * j / (0.2 * fs))
+        peaks = diagnoser.detect_beats(x, fs)
+        rr = [b - a for a, b in zip(peaks, peaks[1:])]
+        self.assertLess(max(rr) - min(rr), 0.1 * fs)

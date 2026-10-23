@@ -1,50 +1,50 @@
-> **Atualização (contrato 2.0 de leitura):** `reading/handler.py` referencia a integração real `ecg-analyser/extractor/lambda_v1.py`. O build ZIP existente preserva deliberadamente o mock legado em `reading/mock_handler.py` e NÃO publica a leitura real. A interpretação continua mock (contrato 1.0). Veja `../CONTRATO_LAMBDAS.md` e `ecg-analyser/extractor/INTEGRACAO_LAMBDA_V1.md` antes de qualquer deploy.
+> **Update (reading contract 2.0):** `reading/handler.py` references the real integration `ecg-analyser/extractor/lambda_v1.py`. The existing ZIP build deliberately keeps the legacy mock in `reading/mock_handler.py` and does NOT publish the real reading. Interpretation is still a mock (contract 1.0). See `../LAMBDA_CONTRACT.md` and `ecg-analyser/extractor/LAMBDA_V1_INTEGRATION.md` before any deploy.
 
-# Lambdas mock de leitura e interpretação de ECG
+# ECG reading and interpretation mock lambdas
 
-Implementam o **contrato v1** ([`../CONTRATO_LAMBDAS.md`](../CONTRATO_LAMBDAS.md)) com resultados sintéticos,
-para validar o fluxo app → backend → lambdas antes dos algoritmos reais (OpenCV 5).
+They implement the **v1 contract** ([`../LAMBDA_CONTRACT.md`](../LAMBDA_CONTRACT.md)) with synthetic results,
+to validate the app → backend → lambdas flow before the real algorithms (OpenCV 5).
 
-| Função AWS | Código | Faz de verdade | É sintético |
+| AWS function | Code | What it really does | What is synthetic |
 |---|---|---|---|
-| `ecg-reading` | `reading/mock_handler.py` | valida payload, lê e decodifica a foto no S3, desenha grade e traço sobre ela, grava `overlay.png` e `signal.json` | o sinal (72 bpm) e a posição da grade |
-| `ecg-interpretation` | `interpretation/handler.py` | valida sexo e sinal, mede FC e amplitudes no sinal recebido, aplica limiares por sexo | PR, QRS, QT e eixo |
+| `ecg-reading` | `reading/mock_handler.py` | validates the payload, reads and decodes the photo from S3, draws the grid and trace over it, writes `overlay.png` and `signal.json` | the signal (72 bpm) and the grid position |
+| `ecg-interpretation` | `../interpretation/handler.py` | validates sex and signal, measures HR and amplitudes on the received signal, applies sex-specific thresholds | PR, QRS, QT and axis |
 
-`ecg_contract/` (envelope, catálogo de erros/avisos, layouts) é copiado para os dois pacotes e pode ser reaproveitado pelas lambdas reais.
+`ecg_contract/` (envelope, error/warning catalog, layouts) is copied into both packages and can be reused by the real lambdas.
 
-## Cenários
+## Scenarios
 
-`"mock": {"scenario": "success | success_with_warnings | failure | refused", "code": "<opcional>"}` no payload.
-Sem esse campo, vale a env `MOCK_SCENARIO` da função (variável Terraform `mock_scenario`) e, na falta dela, `success`.
-A tabela completa está na seção 4 do contrato.
+`"mock": {"scenario": "success | success_with_warnings | failure | refused", "code": "<optional>"}` in the payload.
+Without that field, the function's `MOCK_SCENARIO` env applies (Terraform variable `mock_scenario`) and, failing that, `success`.
+The full table is in section 4 of the contract.
 
-## Testes
+## Tests
 
 ```bash
 pip install pillow boto3
-python -m unittest discover -s mock_lambdas/tests -v   # offline, S3 falso
-python mock_lambdas/smoke_aws.py                       # contra as funções deployadas (profile trustedlake)
+python -m unittest discover -s mock_lambdas/tests -v   # offline, fake S3
+python mock_lambdas/smoke_aws.py                       # against the deployed functions (profile trustedlake)
 ```
 
-## Deploy (sem Docker)
+## Deploy (no Docker)
 
 ```bash
-mock_lambdas/build.sh                                   # gera build/{reading,interpretation}/ (Pillow arm64)
+mock_lambdas/build.sh                                   # builds build/{reading,interpretation}/ (Pillow arm64)
 cd mock_lambdas/infra
 terraform init
 terraform plan  -var="code_version=$(git rev-parse --short HEAD)" -out=tfplan
 terraform apply tfplan
 ```
 
-Stack independente (state `s3://ecg-lambdas-terraform-state/ecg-mock-lambdas/terraform.tfstate`). Ela só
-**lê** os buckets do `ecg-lambdas` e não altera nada lá. Runtime python3.12 arm64, logs no CloudWatch com
-retenção de 30 dias. O principal IAM do backend precisa de `lambda:InvokeFunction` nos ARNs em `terraform output function_arns`.
+Independent stack (state `s3://ecg-lambdas-terraform-state/ecg-mock-lambdas/terraform.tfstate`). It only
+**reads** the `ecg-lambdas` buckets and changes nothing there. Runtime python3.12 arm64, CloudWatch logs with
+30-day retention. The backend's IAM principal needs `lambda:InvokeFunction` on the ARNs in `terraform output function_arns`.
 
-Para trocar pelas lambdas reais, aponte `AWS_LAMBDA_ECG_READING` / `AWS_LAMBDA_ECG_INTERPRETATION` no backend para as novas funções.
+To switch to the real lambdas, point `AWS_LAMBDA_ECG_READING` / `AWS_LAMBDA_ECG_INTERPRETATION` in the backend to the new functions.
 
-## Campo `mock`
+## The `mock` field
 
-Não existem Lambdas separadas de mock. `ecg-reading` e `ecg-interpretation` aceitam o campo
-`mock: {"scenario": "success" | "success_with_warnings" | "failure" | "refused"}` no payload
-(interpretação: sem `refused`). Com ele, a leitura valida a entrada de verdade e devolve um
-sinal sintético no formato 2.0 (6 métodos); sem ele, roda a extração real.
+There are no separate mock Lambdas. `ecg-reading` and `ecg-interpretation` accept the field
+`mock: {"scenario": "success" | "success_with_warnings" | "failure" | "refused"}` in the payload
+(interpretation: no `refused`). With it, reading really validates the input and returns a
+synthetic signal in the 2.0 format (6 methods); without it, it runs the real extraction.

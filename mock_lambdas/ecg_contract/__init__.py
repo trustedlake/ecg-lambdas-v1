@@ -1,8 +1,8 @@
-"""Contrato das lambdas de leitura e interpretação de ECG.
+"""Contract of the ECG reading and interpretation lambdas.
 
-Módulo compartilhado pelas lambdas mock (e reutilizável pelas reais):
-catálogo de erros/avisos, layouts suportados e o envelope de resposta.
-A especificação legível fica em CONTRATO_LAMBDAS.md, na raiz do repo.
+Module shared by the mock lambdas (and reusable by the real ones):
+error/warning catalog, supported layouts and the response envelope.
+The readable specification lives in LAMBDA_CONTRACT.md, at the repo root.
 """
 
 import time
@@ -16,11 +16,11 @@ STATUS_OK_WITH_WARNINGS = "OK_WITH_WARNINGS"
 STATUS_REFUSED = "REFUSED"
 STATUS_ERROR = "ERROR"
 
-# Ordem padrão das 12 derivações.
+# Standard order of the 12 leads.
 STANDARD_LEADS = ("I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6")
 
-# layout -> (grade de derivações por linha, derivações de ritmo de 10 s).
-# Cada linha da grade ocupa 10 s de papel, dividida igualmente entre as colunas.
+# layout -> (grid of leads per row, 10 s rhythm leads).
+# Each grid row spans 10 s of paper, split equally between the columns.
 LAYOUTS = {
     "3x4": ((("I", "aVR", "V1", "V4"), ("II", "aVL", "V2", "V5"), ("III", "aVF", "V3", "V6")), ()),
     "3x4+1": ((("I", "aVR", "V1", "V4"), ("II", "aVL", "V2", "V5"), ("III", "aVF", "V3", "V6")), ("II",)),
@@ -39,53 +39,53 @@ SCENARIO_WARNINGS = "success_with_warnings"
 SCENARIO_FAILURE = "failure"
 SCENARIO_REFUSED = "refused"
 
-# código -> (categoria, retryable, mensagem padrão em pt-BR)
+# code -> (category, retryable, default message in English)
 ERRORS = {
     # Comuns
-    "INVALID_PAYLOAD": ("validation", False, "O payload precisa ser um objeto JSON."),
-    "UNSUPPORTED_CONTRACT_VERSION": ("validation", False, "Versão de contrato não suportada para esta operação."),
-    "REQUEST_ID_INVALID": ("validation", False, "request_id ausente ou inválido (use o UUID da tentativa)."),
-    "MOCK_SCENARIO_INVALID": ("validation", False, "Cenário de teste (mock) inválido."),
-    "STORAGE_ERROR": ("internal", True, "Falha ao ler ou gravar artefatos no S3."),
-    "INTERNAL_ERROR": ("internal", True, "Erro interno inesperado na lambda."),
-    # Leitura — validação de entrada
-    "IMAGE_SOURCE_FORBIDDEN": ("validation", False, "Fonte reservada para testes não pode ser lida pelo adaptador."),
-    "IMAGE_MISSING": ("validation", False, "Informe a imagem do ECG (image.bucket e image.key)."),
-    "IMAGE_NOT_FOUND": ("validation", False, "A imagem informada não existe no S3."),
-    "IMAGE_FORMAT_UNSUPPORTED": ("validation", False, "Formato de imagem não suportado; envie JPG, PNG ou WebP."),
-    "IMAGE_TOO_LARGE": ("validation", False, "A imagem excede o tamanho máximo de 15 MB."),
-    "IMAGE_TOO_SMALL": ("validation", False, "Resolução insuficiente; a imagem deve ter ao menos 800x500 px."),
-    "IMAGE_UNREADABLE": ("validation", False, "Não foi possível decodificar a imagem enviada."),
-    "LAYOUT_MISSING": ("validation", False, "Informe o layout de derivações (ex.: 3x4+1)."),
-    "LAYOUT_UNSUPPORTED": ("validation", False, "Layout de derivações não suportado."),
-    "READ_REFUSED_UNREADABLE_TRACE": ("refused", False, "Nenhum método conseguiu recuperar sinal confiável; envie outra imagem para revisão."),
-    "READ_SELECTOR_UNAVAILABLE": ("processing", False, "Modelo do seletor aprovado indisponível; processamento não executado."),
-    "CALIBRATION_INVALID": ("validation", False, "Calibração inválida; velocidade 12.5/25/50 mm/s e ganho 5/10/20 mm/mV."),
-    # Leitura — recusa (empecilho visível; o usuário deve fotografar de novo)
-    "READ_REFUSED_BLURRY": ("refused", False, "A imagem está borrada ou fora de foco; fotografe novamente com o papel nítido."),
-    "READ_REFUSED_CROPPED": ("refused", False, "O traçado está cortado nas bordas; enquadre o papel inteiro na foto."),
-    "READ_REFUSED_OCCLUDED": ("refused", False, "Há sobreposição sobre o traçado (dedo, reflexo, objeto ou anotação); remova e fotografe novamente."),
-    "READ_REFUSED_LOW_CONTRAST": ("refused", False, "Contraste insuficiente entre o traçado e a grade; melhore a iluminação."),
-    "READ_REFUSED_NOT_ECG": ("refused", False, "A imagem não parece ser um ECG em papel."),
-    "READ_REFUSED_LAYOUT_MISMATCH": ("refused", False, "O layout detectado não corresponde ao layout informado."),
-    # Leitura — falha de processamento
-    "READ_GRID_NOT_FOUND": ("processing", False, "Não foi possível detectar a grade milimetrada do papel."),
-    "READ_TRACE_EXTRACTION_FAILED": ("processing", False, "Não foi possível extrair o traçado das derivações."),
-    # Interpretação — validação de entrada
+    "INVALID_PAYLOAD": ("validation", False, "The payload must be a JSON object."),
+    "UNSUPPORTED_CONTRACT_VERSION": ("validation", False, "Contract version not supported for this operation."),
+    "REQUEST_ID_INVALID": ("validation", False, "Missing or invalid request_id (use the attempt UUID)."),
+    "MOCK_SCENARIO_INVALID": ("validation", False, "Invalid test (mock) scenario."),
+    "STORAGE_ERROR": ("internal", True, "Failed to read or write artifacts in S3."),
+    "INTERNAL_ERROR": ("internal", True, "Unexpected internal error in the lambda."),
+    # Reading — input validation
+    "IMAGE_SOURCE_FORBIDDEN": ("validation", False, "Source reserved for tests cannot be read by the adapter."),
+    "IMAGE_MISSING": ("validation", False, "Provide the ECG image (image.bucket and image.key)."),
+    "IMAGE_NOT_FOUND": ("validation", False, "The given image does not exist in S3."),
+    "IMAGE_FORMAT_UNSUPPORTED": ("validation", False, "Unsupported image format; send JPG, PNG or WebP."),
+    "IMAGE_TOO_LARGE": ("validation", False, "The image exceeds the maximum size of 15 MB."),
+    "IMAGE_TOO_SMALL": ("validation", False, "Insufficient resolution; the image must be at least 800x500 px."),
+    "IMAGE_UNREADABLE": ("validation", False, "Could not decode the uploaded image."),
+    "LAYOUT_MISSING": ("validation", False, "Provide the lead layout (e.g. 3x4+1)."),
+    "LAYOUT_UNSUPPORTED": ("validation", False, "Unsupported lead layout."),
+    "READ_REFUSED_UNREADABLE_TRACE": ("refused", False, "No method could recover a reliable signal; send another image for review."),
+    "READ_SELECTOR_UNAVAILABLE": ("processing", False, "Approved selector model unavailable; processing not run."),
+    "CALIBRATION_INVALID": ("validation", False, "Invalid calibration; speed must be 12.5/25/50 mm/s and gain 5/10/20 mm/mV."),
+    # Reading — refusal (visible obstacle; the user must retake the photo)
+    "READ_REFUSED_BLURRY": ("refused", False, "The image is blurry or out of focus; retake the photo with the paper in sharp focus."),
+    "READ_REFUSED_CROPPED": ("refused", False, "The trace is cut off at the edges; frame the whole paper in the photo."),
+    "READ_REFUSED_OCCLUDED": ("refused", False, "Something overlaps the trace (finger, glare, object or annotation); remove it and retake the photo."),
+    "READ_REFUSED_LOW_CONTRAST": ("refused", False, "Insufficient contrast between the trace and the grid; improve the lighting."),
+    "READ_REFUSED_NOT_ECG": ("refused", False, "The image does not look like a paper ECG."),
+    "READ_REFUSED_LAYOUT_MISMATCH": ("refused", False, "The detected layout does not match the given layout."),
+    # Reading — processing failure
+    "READ_GRID_NOT_FOUND": ("processing", False, "Could not detect the millimeter grid of the paper."),
+    "READ_TRACE_EXTRACTION_FAILED": ("processing", False, "Could not extract the trace of the leads."),
+    # Interpretation — input validation
     "SEX_MISSING": ("validation", False, "Informe o sexo do paciente (patient.sex)."),
-    "SEX_INVALID": ("validation", False, "Sexo do paciente inválido; use \"F\" ou \"M\"."),
-    "SIGNAL_MISSING": ("validation", False, "Informe o sinal do ECG (signal)."),
-    "SIGNAL_INVALID": ("validation", False, "Sinal do ECG em formato inválido."),
-    "SIGNAL_SAMPLING_RATE_INVALID": ("validation", False, "Taxa de amostragem inválida; use entre 100 e 2000 Hz."),
-    "SIGNAL_LEAD_UNKNOWN": ("validation", False, "Derivação desconhecida no sinal."),
-    "SIGNAL_TOO_SHORT": ("validation", False, "Sinal curto demais; cada derivação precisa de ao menos 1 s."),
-    # Interpretação — falha de processamento
-    "INTERP_NO_QRS_DETECTED": ("processing", False, "Nenhum complexo QRS detectado no sinal."),
-    "INTERP_SIGNAL_TOO_NOISY": ("processing", False, "Sinal ruidoso demais para interpretação confiável."),
+    "SEX_INVALID": ("validation", False, "Invalid patient sex; use \"F\" or \"M\"."),
+    "SIGNAL_MISSING": ("validation", False, "Provide the ECG signal (signal)."),
+    "SIGNAL_INVALID": ("validation", False, "ECG signal in an invalid format."),
+    "SIGNAL_SAMPLING_RATE_INVALID": ("validation", False, "Invalid sampling rate; use between 100 and 2000 Hz."),
+    "SIGNAL_LEAD_UNKNOWN": ("validation", False, "Unknown lead in the signal."),
+    "SIGNAL_TOO_SHORT": ("validation", False, "Signal too short; each lead needs at least 1 s."),
+    # Interpretation — processing failure
+    "INTERP_NO_QRS_DETECTED": ("processing", False, "No QRS complex detected in the signal."),
+    "INTERP_SIGNAL_TOO_NOISY": ("processing", False, "Signal too noisy for a reliable interpretation."),
 }
 
 WARNINGS = {
-    # Leitura
+    # Reading
     "AMBIGUOUS_TRACE": "The trace has ambiguous regions that need human review.",
     "GRID_CALIBRATION_UNCERTAIN": "Grid calibration not confirmed.",
     "GEOMETRY_FALLBACK": "Geometry estimated by a fallback method.",
@@ -95,7 +95,7 @@ WARNINGS = {
     "LEAD_SATURATED": "Trace touches the neighboring lead; amplitudes may be clipped.",
     "IMAGE_ROTATION_CORRECTED": "The image was tilted and was aligned automatically.",
     "CALIBRATION_PULSE_NOT_FOUND": "Calibration pulse not found; the provided calibration was used.",
-    # Interpretação
+    # Interpretation
     "LEAD_MISSING": "Lead missing from the signal; criteria that depend on it were skipped.",
     "LEAD_LOW_QUALITY": "Low-quality lead; measurements on it are less reliable.",
     "MEASUREMENT_UNRELIABLE": "Measurement computed with low confidence.",
@@ -107,11 +107,11 @@ INTERP_FAILURE_CODES = ("INTERP_NO_QRS_DETECTED", "INTERP_SIGNAL_TOO_NOISY", "IN
 
 
 class ContractError(Exception):
-    """Erro do catálogo: vira um envelope ERROR ou REFUSED, nunca FunctionError."""
+    """Catalog error: becomes an ERROR or REFUSED envelope, never a FunctionError."""
 
     def __init__(self, code, message=None, details=None):
         if code not in ERRORS:
-            raise ValueError(f"código de erro fora do catálogo: {code}")
+            raise ValueError(f"error code not in the catalog: {code}")
         self.code = code
         self.message = message or ERRORS[code][2]
         self.details = details or {}
@@ -125,7 +125,7 @@ class ContractError(Exception):
 
 def warning(code, lead=None, message=None):
     if code not in WARNINGS:
-        raise ValueError(f"código de aviso fora do catálogo: {code}")
+        raise ValueError(f"warning code not in the catalog: {code}")
     item = {"code": code, "message": message or WARNINGS[code]}
     if lead:
         item["lead"] = lead
@@ -133,7 +133,7 @@ def warning(code, lead=None, message=None):
 
 
 class Envelope:
-    """Monta a resposta padrão; mede a duração desde a criação."""
+    """Builds the standard response; measures the duration since creation."""
 
     def __init__(self, operation, engine, engine_version):
         self.operation = operation
@@ -163,7 +163,7 @@ class Envelope:
 
 
 def validate_common(event, operation="interpret"):
-    """Valida o que é comum às duas lambdas e devolve (request_id, mock)."""
+    """Validates what is common to both lambdas and returns (request_id, mock)."""
     if not isinstance(event, dict):
         raise ContractError("INVALID_PAYLOAD")
     version = event.get("contract_version", INTERPRET_LEGACY_VERSION if operation in ("interpret", "legacy_read") else CONTRACT_VERSION)
@@ -179,9 +179,9 @@ def validate_common(event, operation="interpret"):
 
 
 def resolve_mock(event, default_scenario, allowed_scenarios, allowed_codes):
-    """Escolhe o cenário mock: payload `mock` > env MOCK_SCENARIO > success.
+    """Picks the mock scenario: payload `mock` > env MOCK_SCENARIO > success.
 
-    Exclusivo das lambdas mock; as reais devem ignorar o campo `mock`.
+    Exclusive to the mock lambdas; the real ones must ignore the `mock` field.
     """
     mock = event.get("mock") if isinstance(event, dict) else None
     if mock is None:

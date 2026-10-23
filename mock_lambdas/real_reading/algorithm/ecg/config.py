@@ -102,7 +102,7 @@ def resolve(config,source):
         if len(matches)!=1: raise ValueError('Filename must select exactly one configured layout variant')
         c.update(matches[0])
     c['rows']=len(c['leads']); c['columns']=len(c['leads'][0])
-    c['layout_label']=f"{c['rows']} linhas x {c['columns']} colunas"+(' + '+', '.join(c.get('rhythm_leads',[])) if c.get('rhythm_leads') else '')
+    c['layout_label']=f"{c['rows']} rows x {c['columns']} columns"+(' + '+', '.join(r.replace('_longo',' rhythm') for r in c.get('rhythm_leads',[])) if c.get('rhythm_leads') else '')
     return c
 
 
