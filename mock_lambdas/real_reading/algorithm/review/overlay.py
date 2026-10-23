@@ -10,6 +10,10 @@ def font(size):
     return ImageFont.load_default()
 
 
+def overlay_geometry(w,h):
+    scale=w/1800.;pad=max(14,int(22*scale));header=max(86,int(106*scale));footer=max(58,int(70*scale))
+    return [pad,header],[w+2*pad,h+header+footer]
+
 def render(a,leads,traces,grid,config,status):
     h,w=a.shape[:2];scale=w/1800.;pad=max(14,int(22*scale));header=max(86,int(106*scale));footer=max(58,int(70*scale))
     canvas=Image.new('RGB',(w+2*pad,h+header+footer),'#eef3f7')

@@ -247,7 +247,7 @@ def _method_run(name, method, image, geometry, grid, config, base):
     from research_methods.frozen_peaks34.ecg.extract import convert
     from research_methods.contracts import Context, MethodAbstention
     from research_methods.frozen_peaks34.ecg.contrast_gate import assess_color_separation
-    from review.overlay import render
+    from review.overlay import render, overlay_geometry
 
     metadata = {'method': name, 'version': method.VERSION, 'status': 'ERROR', 'selector_score': None,
                 'sampling_rate_hz': None, 'reason': None, 'warnings': [],
@@ -308,6 +308,8 @@ def _method_run(name, method, image, geometry, grid, config, base):
                 metadata['sampling_rate_hz'] = round(rate, 5)
                 signal = {'sampling_rate_hz': rate, 'units': 'mV', 'leads': leads,
                           'image_size_px': [int(image.shape[1]), int(image.shape[0])],
+                          'overlay_offset_px': overlay_geometry(image.shape[1], image.shape[0])[0],
+                          'overlay_size_px': overlay_geometry(image.shape[1], image.shape[0])[1],
                           'layout': config['requested_layout'],
                           'calibration': deepcopy(config['calibration'])}
                 warnings = _warnings(geometry, grid, result.traces, [x['name'] for x in result.leads])
