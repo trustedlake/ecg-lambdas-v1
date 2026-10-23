@@ -11,7 +11,7 @@ Lambdas de **leitura** e **interpretação** de ECG do projeto ECG, e o contrato
 | Mocks deployados (`ecg-reading`, `ecg-interpretation`), testes, smoke test e Terraform | [`mock_lambdas/`](mock_lambdas/README.md) |
 | Módulo comum (envelope, validação, catálogo), reaproveitável pelas lambdas reais | [`mock_lambdas/ecg_contract/`](mock_lambdas/ecg_contract/__init__.py) |
 
-AWS: conta `785236377332`, região `sa-east-1`, profile `trustedlake`.
+AWS: conta `785236377332`, região `us-east-1` (migrado de sa-east-1 em 2026-10-23; state em `ecg-terraform-state-785236377332-us-east-1`), profile `trustedlake`.
 
 ```bash
 pip install pillow boto3
