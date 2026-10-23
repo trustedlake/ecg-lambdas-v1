@@ -350,7 +350,7 @@ def _criterion(name, value, unit, limit, sex_specific, reference=None):
 
 
 def diagnose(sex, fs, leads):
-    """leads: [{"name", "samples"}] -> (summary, details, warnings). Raises NoQrs / TooNoisy."""
+    """leads: [{"name", "samples"}] -> (summary, details, warnings). Checks that cannot be done are listed in details["checks"]."""
     warnings, findings, criteria = [], [], []
 
     def find(code, label, severity, evidence, mark=None, marks=None, alert=None):
@@ -373,46 +373,58 @@ def diagnose(sex, fs, leads):
     spans = [(a, b) for a, b in zip(peaks, peaks[1:]) if not _has_gap(x, a, b)]
     rr = [(b - a) / fs for a, b in spans]
     rinfo = {"name": longest["name"], "raw": raw, "x": x, "px": _lead_px(longest)}
+    unchecked = {}  # check code -> reason it could not be done
+    hr = None
     if not rr:
-        raise NoQrs()
-    hr = round(60 / _median(rr))
-    if hr > 300 or hr < 15:
-        raise TooNoisy()
-    cv = statistics.pstdev(rr) / (sum(rr) / len(rr)) if len(rr) > 1 else 0.0
-    rhythm_conf = "high" if len(rr) >= 4 else "medium"
-    if len(rr) >= 4 and cv > RR_CV_IRREGULAR:
-        rhythm = "Irregular rhythm"
-        find("IRREGULAR_RHYTHM", "Irregular rhythm (P waves not assessed)", "warning",
-             f"RR variation {cv * 100:.0f}% over {len(rr)} intervals; possible atrial fibrillation or ectopy",
-             _mark(rinfo, fs, *spans[max(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))], "Most irregular interval"))
+        rate_fail = "no heartbeats found in the signal"
     else:
-        rhythm = "Regular rhythm"
-        if len(rr) >= 4 and cv > RR_CV_NEAR:
-            find("RR_VARIATION_BORDERLINE", "Borderline RR variation", "info",
-                 f"RR variation {cv * 100:.0f}% over {len(rr)} intervals (irregular above {RR_CV_IRREGULAR * 100:.0f}%)",
-                 _mark(rinfo, fs, *spans[max(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))], "Most irregular interval"),
-                 alert="review")
-    k = min(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))
-    typical = lambda: _mark(rinfo, fs, *spans[k], "Typical beat interval")
-    if hr < HR_LOW:
-        marked = hr < HR_URGENT_LOW
-        find("BRADYCARDIA", "Low heart rate" + (" (marked)" if marked else ""), "critical" if marked else "warning",
-             f"{hr} bpm (< {HR_LOW})", typical())
-    elif hr >= HR_HIGH:
-        marked = hr >= HR_URGENT_HIGH
-        find("TACHYCARDIA", "High heart rate" + (" (marked)" if marked else ""), "critical" if marked else "warning",
-             f"{hr} bpm (≥ {HR_HIGH})", typical())
-    elif hr < HR_LOW + HR_NEAR_BPM:
-        find("HEART_RATE_NEAR_LOW", "Heart rate close to the bradycardia limit", "info",
-             f"{hr} bpm (bradycardia < {HR_LOW})", typical(), alert="review")
-    elif hr >= HR_HIGH - HR_NEAR_BPM:
-        find("HEART_RATE_NEAR_HIGH", "Heart rate close to the tachycardia limit", "info",
-             f"{hr} bpm (tachycardia ≥ {HR_HIGH})", typical(), alert="review")
-    if max(rr) > PAUSE_S:
-        relevant = max(rr) > PAUSE_RELEVANT_S
-        find("PAUSE", "Pause", "critical" if relevant else "warning",
-             f"longest RR {max(rr):.1f} s (> {PAUSE_S} s)" + ("; clinically relevant (> 2 s)" if relevant else ""),
-             _mark(rinfo, fs, *spans[rr.index(max(rr))], "Longest pause"))
+        hr = round(60 / _median(rr))
+        rate_fail = "signal too noisy for a reliable heart rate" if (hr > 300 or hr < 15) else None
+        if rate_fail:
+            hr = None
+    rate_ok = rate_fail is None
+    rhythm = "Rhythm not assessed"
+    rhythm_conf = "low"
+    if rate_ok:
+        cv = statistics.pstdev(rr) / (sum(rr) / len(rr)) if len(rr) > 1 else 0.0
+        rhythm_conf = "high" if len(rr) >= 4 else "medium"
+        if len(rr) >= 4 and cv > RR_CV_IRREGULAR:
+            rhythm = "Irregular rhythm"
+            find("IRREGULAR_RHYTHM", "Irregular rhythm (P waves not assessed)", "warning",
+                 f"RR variation {cv * 100:.0f}% over {len(rr)} intervals; possible atrial fibrillation or ectopy",
+                 _mark(rinfo, fs, *spans[max(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))], "Most irregular interval"))
+        else:
+            rhythm = "Regular rhythm"
+            if len(rr) >= 4 and cv > RR_CV_NEAR:
+                find("RR_VARIATION_BORDERLINE", "Borderline RR variation", "info",
+                     f"RR variation {cv * 100:.0f}% over {len(rr)} intervals (irregular above {RR_CV_IRREGULAR * 100:.0f}%)",
+                     _mark(rinfo, fs, *spans[max(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))], "Most irregular interval"),
+                     alert="review")
+        k = min(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))
+        typical = lambda: _mark(rinfo, fs, *spans[k], "Typical beat interval")
+        if hr < HR_LOW:
+            marked = hr < HR_URGENT_LOW
+            find("BRADYCARDIA", "Low heart rate" + (" (marked)" if marked else ""), "critical" if marked else "warning",
+                 f"{hr} bpm (< {HR_LOW})", typical())
+        elif hr >= HR_HIGH:
+            marked = hr >= HR_URGENT_HIGH
+            find("TACHYCARDIA", "High heart rate" + (" (marked)" if marked else ""), "critical" if marked else "warning",
+                 f"{hr} bpm (≥ {HR_HIGH})", typical())
+        elif hr < HR_LOW + HR_NEAR_BPM:
+            find("HEART_RATE_NEAR_LOW", "Heart rate close to the bradycardia limit", "info",
+                 f"{hr} bpm (bradycardia < {HR_LOW})", typical(), alert="review")
+        elif hr >= HR_HIGH - HR_NEAR_BPM:
+            find("HEART_RATE_NEAR_HIGH", "Heart rate close to the tachycardia limit", "info",
+                 f"{hr} bpm (tachycardia ≥ {HR_HIGH})", typical(), alert="review")
+        if max(rr) > PAUSE_S:
+            relevant = max(rr) > PAUSE_RELEVANT_S
+            find("PAUSE", "Pause", "critical" if relevant else "warning",
+                 f"longest RR {max(rr):.1f} s (> {PAUSE_S} s)" + ("; clinically relevant (> 2 s)" if relevant else ""),
+                 _mark(rinfo, fs, *spans[rr.index(max(rr))], "Longest pause"))
+
+    else:
+        for code in ("HEART_RATE", "RHYTHM_REGULARITY", "PAUSE"):
+            unchecked[code] = rate_fail
 
     # QRS duration and bundle branch block .
     durations = sorted(d for d in (_stat(i, "dur_ms") for i in infos.values()) if d is not None)
@@ -445,7 +457,7 @@ def diagnose(sex, fs, leads):
                      f"QRS {qrs} ms (≥ 120), negative V1, positive I/V6 without septal q; {UNVALIDATED}", qrs_mark())
             else:
                 find("WIDE_QRS", "Wide QRS (intraventricular conduction delay)", "warning", f"QRS {qrs} ms (≥ 120)", qrs_mark())
-            if hr >= HR_HIGH:
+            if hr is not None and hr >= HR_HIGH:
                 find("WIDE_QRS_TACHYCARDIA", "Wide-complex tachycardia", "critical",
                      f"QRS {qrs} ms (≥ {WIDE_QRS_MS}) at {hr} bpm (≥ {HR_HIGH})", qrs_mark())
         elif qrs >= BORDERLINE_QRS_MS:
@@ -473,7 +485,7 @@ def diagnose(sex, fs, leads):
             find("EXTREME_AXIS", "Extreme axis deviation", "warning", f"axis {axis}° (−90° to −180°); {axis_detail}", axis_mark(), axis_marks())
 
     # Voltage criteria .
-    sok = cor = None
+    sok = cor = rv = None
     if s_amp.get("V1") is not None and (r_amp.get("V5") is not None or r_amp.get("V6") is not None):
         sok = round(s_amp["V1"] + max(r_amp.get("V5") or 0, r_amp.get("V6") or 0), 2)
     if r_amp.get("aVL") is not None and s_amp.get("V3") is not None:
@@ -484,12 +496,18 @@ def diagnose(sex, fs, leads):
     lvh = [f"{n} {v} mV" for n, v, lim in (("Sokolow-Lyon", sok, SOKOLOW_MV), ("Cornell", cor, CORNELL_MV[sex]))
            if v is not None and v > lim]
     if lvh:
-        cands = ([("V1", "s"), ("V5", "r"), ("V6", "r")] if sok is not None and sok > SOKOLOW_MV
-                 else [("aVL", "r"), ("V3", "s")])
         amp = {"r": r_amp, "s": s_amp}
-        lvh_lead, lvh_key = max(((n, k) for n, k in cands if amp[k].get(n) is not None), key=lambda c: amp[c[1]][c[0]])
+        parts = []  # every wave that enters a formula over its limit: (lead, wave key, formula)
+        if sok is not None and sok > SOKOLOW_MV:
+            r_lead = max(("V5", "V6"), key=lambda n: r_amp.get(n) or 0)
+            parts += [("V1", "s", "Sokolow-Lyon"), (r_lead, "r", "Sokolow-Lyon")]
+        if cor is not None and cor > CORNELL_MV[sex]:
+            parts += [("aVL", "r", "Cornell"), ("V3", "s", "Cornell")]
+        lvh_marks = [m for m in (
+            _beat_mark_by_key(infos, fs, n, k, f"{k.upper()} wave in {n} (part of {f}, {amp[k][n]:.2f} mV)")
+            for n, k, f in parts if amp[k].get(n) is not None) if m]
         find("LVH_VOLTAGE", "Voltage criteria for left ventricular hypertrophy", "warning", "; ".join(lvh),
-             _beat_mark_by_key(infos, fs, lvh_lead, lvh_key, f"Tallest {lvh_key.upper()} wave in {lvh_lead}"))
+             lvh_marks[0] if lvh_marks else None, lvh_marks or None)
     else:
         near = [f"{n} {v} mV (limit {lim} mV)" for n, v, lim in (("Sokolow-Lyon", sok, SOKOLOW_MV), ("Cornell", cor, CORNELL_MV[sex]))
                 if v is not None and v > VOLTAGE_NEAR * lim]
@@ -498,10 +516,14 @@ def diagnose(sex, fs, leads):
                  "; ".join(near), alert="review")
     if r_amp.get("V1") is not None and (s_amp.get("V5") is not None or s_amp.get("V6") is not None):
         rv = round(r_amp["V1"] + max(s_amp.get("V5") or 0, s_amp.get("V6") or 0), 2)
+        rv_lead = max(("V5", "V6"), key=lambda n: s_amp.get(n) or 0)
         if rv > RVH_MV and axis is not None and axis > 90:
             find("RVH_PATTERN", "Pattern suggestive of right ventricular hypertrophy", "warning",
                  f"R V1 + S V5/V6 {rv} mV (> {RVH_MV}) with right axis",
-                 _beat_mark_by_key(infos, fs, "V1", "r", "R wave in V1"))
+                 _beat_mark_by_key(infos, fs, "V1", "r", "R wave in V1"),
+                 [m for m in (_beat_mark_by_key(infos, fs, "V1", "r", f"R wave in V1 (part of the sum, {r_amp['V1']:.2f} mV)"),
+                              _beat_mark_by_key(infos, fs, rv_lead, "s", f"S wave in {rv_lead} (part of the sum, {s_amp[rv_lead]:.2f} mV)"))
+                  if m] or None)
 
     # ST segment and Q waves : two contiguous leads, aVR excluded.
     st = {n: _stat(i, "st") for n, i in infos.items() if i["beats"] and n != "aVR"}
@@ -539,8 +561,29 @@ def diagnose(sex, fs, leads):
                          "quality": "good" if ok else "low", "quality_reason": reason,
                          "estimated": any(b["bridged"] for b in i["beats"])})
 
+    # Every check is always listed: done, not possible (with the reason) or not implemented.
+    no_leads = "the leads it needs could not be measured"
+    not_possible = {
+        "QRS_DURATION": qrs is None, "BUNDLE_BRANCH_BLOCK": qrs is None, "AXIS": axis is None,
+        "LVH_SOKOLOW_LYON": sok is None, "LVH_CORNELL": cor is None, "RVH": rv is None or axis is None,
+        "ST_ELEVATION": len(st) < 2, "ST_DEPRESSION": len(st) < 2,
+        "PATHOLOGICAL_Q": sum(1 for n, i in infos.items() if n != "aVR" and i["beats"]) < 2}
+    for code, failed in not_possible.items():
+        if failed:
+            unchecked[code] = no_leads
+    check_names = {
+        "HEART_RATE": "Heart rate", "RHYTHM_REGULARITY": "Rhythm regularity", "PAUSE": "Pause",
+        "QRS_DURATION": "QRS duration", "BUNDLE_BRANCH_BLOCK": "Bundle branch block", "AXIS": "Electrical axis",
+        "LVH_SOKOLOW_LYON": "Left ventricular hypertrophy (Sokolow-Lyon)",
+        "LVH_CORNELL": "Left ventricular hypertrophy (Cornell)", "RVH": "Right ventricular hypertrophy",
+        "ST_ELEVATION": "ST elevation", "ST_DEPRESSION": "ST depression", "PATHOLOGICAL_Q": "Pathological Q waves"}
+    checks = [{"code": c, "name": n, "status": "not_possible" if c in unchecked else "done",
+               **({"reason": unchecked[c]} if c in unchecked else {})} for c, n in check_names.items()]
+    checks += [{"code": c, "name": n, "status": "not_implemented", "reason": "cannot be measured reliably from a photographed trace"}
+               for c, n in (("PR_AV_BLOCK", "PR interval / AV block"), ("QT_QTC", "QT / QTc"), ("P_WAVE", "P wave"))]
+
     abnormal = [f for f in findings if f["severity"] != "info"]
-    partial = qrs_conf == "low" or len(per_lead) < 12
+    partial = qrs_conf == "low" or len(per_lead) < 12 or any(c in unchecked for c in check_names)
     classification = "abnormal" if abnormal else ("borderline" if partial else "normal")
     headline = {"normal": "No abnormal pattern found in the criteria that could be checked",
                 "borderline": "No abnormal pattern found in the parts of the ECG that could be read",
@@ -548,6 +591,7 @@ def diagnose(sex, fs, leads):
     reasons = [f["label"] for f in findings if f["alert_level"] != "ok"]
     if partial:
         reasons.append("Part of the ECG could not be read reliably")
+    reasons += [f"Could not check: {check_names[c]} ({r})" for c, r in unchecked.items()]
     alert = max([f["alert_level"] for f in findings] + ["review" if partial else "ok"], key=ALERT_ORDER.index)
     alert_text = {"ok": "No sign of a problem in the criteria that could be checked",
                   "review": "Possible problem: a person should review this ECG",
@@ -555,14 +599,16 @@ def diagnose(sex, fs, leads):
     summary = {"classification": classification, "headline": headline, "rhythm": rhythm, "heart_rate_bpm": hr,
                "alert_level": alert, "alert_text": alert_text, "alert_reasons": reasons,
                "key_findings": [f["label"] for f in (abnormal or findings[:2])],
-               "text": f"{rhythm}, heart rate {hr} bpm" + (f", QRS {qrs} ms" if qrs else "") + f". {headline}."}
+               "text": f"{rhythm}, " + (f"heart rate {hr} bpm" if hr is not None else "heart rate not measurable")
+               + (f", QRS {qrs} ms" if qrs else "") + f". {headline}."}
     measurements = {
         "heart_rate_bpm": {"value": hr, "unit": "bpm", "confidence": rhythm_conf, "lead": longest["name"]},
-        "rr_ms": {"value": round(_median(rr) * 1000), "unit": "ms", "confidence": rhythm_conf},
+        "rr_ms": {"value": round(_median(rr) * 1000) if rate_ok else None, "unit": "ms", "confidence": rhythm_conf},
         "pr_ms": {"value": None, "unit": "ms", "confidence": "low"},
         "qrs_ms": {"value": qrs, "unit": "ms", "confidence": qrs_conf},
         "qt_ms": {"value": None, "unit": "ms", "confidence": "low"},
         "qtc_ms": {"value": None, "unit": "ms", "confidence": "low", "formula": "Bazett"},
         "qrs_axis_deg": {"value": axis, "unit": "deg", "confidence": "medium" if axis is not None else "low"},
     }
-    return summary, {"measurements": measurements, "findings": findings, "criteria": criteria, "per_lead": per_lead}, warnings
+    return summary, {"measurements": measurements, "findings": findings, "criteria": criteria, "per_lead": per_lead,
+                          "checks": checks}, warnings
