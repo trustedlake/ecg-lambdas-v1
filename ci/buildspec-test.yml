@@ -1,0 +1,21 @@
+# Test action (parallel with Build): offline unit tests of both lambdas. No AWS calls.
+version: 0.2
+
+env:
+  variables:
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - python -m pip install --quiet -r mock_lambdas/real_reading/requirements.txt pytest
+  build:
+    commands:
+      - python -m unittest discover -s mock_lambdas/tests -v
+      - python -m pytest mock_lambdas/real_reading/tests -q
+
+cache:
+  paths:
+    - /root/.cache/pip/**/*

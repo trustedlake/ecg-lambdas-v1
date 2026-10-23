@@ -40,6 +40,6 @@ variable "mock_scenario" {
 
 variable "reading_image_tag" {
   type        = string
-  description = "Tag of the real reading image in the ECR repo ecg-analyser."
-  default     = "v6-quiet"
+  description = "Tag of the real reading image in the ECR repo ecg-analyser (initial value only: the pipeline deploys the code)."
+  default     = "v8-tips"
 }

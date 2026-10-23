@@ -102,6 +102,11 @@ resource "aws_lambda_function" "this" {
     variables = each.value.environment
   }
 
+  # The code and CODE_VERSION (the commit) are set by the lambdas pipeline (ci/), not by terraform apply.
+  lifecycle {
+    ignore_changes = [filename, source_code_hash, environment[0].variables["CODE_VERSION"]]
+  }
+
   depends_on = [aws_cloudwatch_log_group.this, aws_iam_role_policy_attachment.basic]
 }
 
@@ -109,8 +114,36 @@ resource "aws_lambda_function" "this" {
 # REAL reading (ecg-analyser, contract 2.0): Lambda as a container image.
 # Image in the existing ECR repo "ecg-analyser", tag var.reading_image_tag.
 # ---------------------------------------------------------------------------
-data "aws_ecr_repository" "analyser" {
-  name = "ecg-analyser"
+# The repo was created by hand; imported so terraform owns it (and its lifecycle policy).
+import {
+  to = aws_ecr_repository.analyser
+  id = "ecg-analyser"
+}
+
+resource "aws_ecr_repository" "analyser" {
+  name                 = "ecg-analyser"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = false
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+}
+
+# The pipeline pushes one image per commit; keep the latest 15 (the running one and its rollback targets).
+resource "aws_ecr_lifecycle_policy" "analyser" {
+  repository = aws_ecr_repository.analyser.name
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep the latest 15 images"
+      selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = 15 }
+      action       = { type = "expire" }
+    }]
+  })
 }
 
 resource "aws_iam_role" "reading_real" {
@@ -152,10 +185,15 @@ resource "aws_lambda_function" "reading_real" {
   description   = "REAL ECG reading (ecg-analyser, 6 methods, contract 2.0)"
   role          = aws_iam_role.reading_real.arn
   package_type  = "Image"
-  image_uri     = "${data.aws_ecr_repository.analyser.repository_url}:${var.reading_image_tag}"
+  image_uri     = "${aws_ecr_repository.analyser.repository_url}:${var.reading_image_tag}"
   architectures = ["x86_64"]
   timeout       = 900
   memory_size   = 3538 # 2 vCPU: the 6 methods run in subprocesses
+  # The image and CODE_VERSION (the commit) are set by the lambdas pipeline (ci/); reading_image_tag is only used to create the function.
+  lifecycle {
+    ignore_changes = [image_uri, environment[0].variables["CODE_VERSION"]]
+  }
+
   environment {
     variables = { RESULTS_BUCKET = data.aws_s3_bucket.results.id, CODE_VERSION = var.code_version }
   }

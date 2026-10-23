@@ -1,0 +1,35 @@
+# Build action: ecg-interpretation ZIP + ecg-reading image (x86_64) in ECR, tagged with the commit (immutable by convention).
+# MODELS_BUCKET and ECR_REPOSITORY_URL come from the project (mock_lambdas/infra/cicd.tf).
+# The selector model is not in git: it is downloaded from MODELS_BUCKET and checked against real_reading/model.sha256.
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - export IMAGE_TAG="$(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c1-7)"
+      - echo "IMAGE_TAG=$IMAGE_TAG"
+      - aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URL%%/*}"
+  build:
+    commands:
+      - bash mock_lambdas/build.sh
+      - (cd mock_lambdas/build/interpretation && zip -qr "$CODEBUILD_SRC_DIR/interpretation.zip" .)
+      - |
+        set -e
+        if aws ecr describe-images --repository-name "${ECR_REPOSITORY_URL#*/}" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
+          echo "Image $IMAGE_TAG already exists in ECR; skipping build."
+        else
+          mkdir -p mock_lambdas/real_reading/models
+          aws s3 cp "s3://$MODELS_BUCKET/model_selector.pkl" mock_lambdas/real_reading/models/model_selector.pkl --no-progress
+          echo "$(cat mock_lambdas/real_reading/model.sha256)  mock_lambdas/real_reading/models/model_selector.pkl" | sha256sum -c -
+          bash mock_lambdas/real_reading/assemble.sh
+          docker build -t "$ECR_REPOSITORY_URL:$IMAGE_TAG" mock_lambdas/real_reading/build
+          docker push "$ECR_REPOSITORY_URL:$IMAGE_TAG"
+        fi
+  post_build:
+    commands:
+      - echo "IMAGE_TAG=$IMAGE_TAG" > image.env
+
+artifacts:
+  files:
+    - image.env
+    - interpretation.zip

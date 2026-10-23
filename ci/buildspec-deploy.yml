@@ -1,0 +1,13 @@
+# Deploy action: swaps the code of both lambdas, runs the smoke test and rolls back if it fails.
+# FUNCTION_READING, FUNCTION_INTERPRETATION and ECR_REPOSITORY_URL come from the project (mock_lambdas/infra/cicd.tf).
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - python -m pip install --quiet boto3 pillow
+  build:
+    commands:
+      - bash ci/deploy.sh
