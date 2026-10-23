@@ -103,6 +103,14 @@ class InterpretationTests(unittest.TestCase):
         self.assertFalse(codes & {"ST_ELEVATION", "ST_DEPRESSION", "PATHOLOGICAL_Q", "RBBB_PATTERN", "LBBB_PATTERN"})
         self.assertIsNone(result["details"]["measurements"]["pr_ms"]["value"])
         self.assertTrue(result["disclaimer"])
+        self.assertIn(result["summary"]["alert_level"], ("ok", "review"))
+        self.assertTrue(all(f["alert_level"] in ("ok", "review", "urgent") for f in result["details"]["findings"]))
+
+    def test_marked_tachycardia_is_urgent(self):
+        fast = {"sampling_rate_hz": 500, "leads": [{"name": "II", "samples": ([0.0] * 87 + [1.0] + [0.0] * 87) * 30}]}
+        result = self.call(signal=fast)["result"]
+        self.assertGreaterEqual(result["summary"]["heart_rate_bpm"], 150)
+        self.assertEqual(result["summary"]["alert_level"], "urgent")
 
     def test_success_with_warnings(self):
         response = self.call(mock={"scenario": "success_with_warnings"})

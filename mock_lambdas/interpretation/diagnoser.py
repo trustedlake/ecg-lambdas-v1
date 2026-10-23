@@ -3,13 +3,15 @@
 Works on the extracted signal (mV, native sampling rate, gaps as None) using published
 interpretation criteria that can be checked on an extracted trace: QRS duration, voltage
 criteria for hypertrophy, axis and the rate/rhythm thresholds. ST, Q-wave and bundle
-branch findings are computed but only reported when EXPERIMENTAL is set. Anything that
+branch findings use rules not yet validated on photographed traces, so they are reported
+as "possible" with a review alert. Every result carries a three-level alert (ok / review /
+urgent) biased towards false positives: values close to a limit and partial readings also
+ask for review. Anything that
 cannot be measured reliably from a photographed trace (P wave, PR, QT) is returned as not
 measurable instead of being estimated. Stdlib only. No tuning per image.
 """
 
 import math
-import os
 import statistics
 
 LEADS = ("I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6")
@@ -28,7 +30,15 @@ RVH_MV = 1.05
 HR_LOW, HR_HIGH, PAUSE_S, PAUSE_RELEVANT_S = 50, 100, 1.5, 2.0
 NAN = float("nan")
 MAX_BRIDGED_GAP_S = 0.02   # gaps up to 20 ms are bridged for QRS measurement only
-EXPERIMENTAL = os.environ.get("ECG_EXPERIMENTAL") == "1"   # local evaluation only; never set in production
+# Alert levels: "urgent" = clear, time-sensitive abnormality; "review" = any sign a person should
+# look (including values close to a limit); "ok" = nothing found. False positives are preferred.
+ALERT_ORDER = ("ok", "review", "urgent")
+HR_URGENT_LOW, HR_URGENT_HIGH = 40, 150
+HR_NEAR_BPM = 5            # rates within 5 bpm of a limit ask for review
+AXIS_NEAR_DEG = 10         # axis within 10 degrees of a limit asks for review
+VOLTAGE_NEAR = 0.9         # voltage sums above 90% of a limit ask for review
+RR_CV_NEAR, RR_CV_IRREGULAR = 0.10, 0.15
+UNVALIDATED = "rule not yet validated on photographed ECGs; confirm by eye"
 MARK_PAD_S = 0.25
 MARK_MAX_S = 4.0
 
@@ -343,9 +353,10 @@ def diagnose(sex, fs, leads):
     """leads: [{"name", "samples"}] -> (summary, details, warnings). Raises NoQrs / TooNoisy."""
     warnings, findings, criteria = [], [], []
 
-    def find(code, label, severity, evidence, mark=None, marks=None):
+    def find(code, label, severity, evidence, mark=None, marks=None, alert=None):
         # `mark` is the primary evidence window; `marks` lists every window the finding is based on.
-        findings.append({"code": code, "label": label, "severity": severity, "evidence": evidence,
+        alert = alert or {"info": "ok", "warning": "review", "critical": "urgent"}[severity]
+        findings.append({"code": code, "label": label, "severity": severity, "alert_level": alert, "evidence": evidence,
                          **({"mark": mark} if mark else {}), **({"marks": marks} if marks else {})})
 
     infos = {}
@@ -369,23 +380,38 @@ def diagnose(sex, fs, leads):
         raise TooNoisy()
     cv = statistics.pstdev(rr) / (sum(rr) / len(rr)) if len(rr) > 1 else 0.0
     rhythm_conf = "high" if len(rr) >= 4 else "medium"
-    if len(rr) >= 4 and cv > 0.15:
+    if len(rr) >= 4 and cv > RR_CV_IRREGULAR:
         rhythm = "Irregular rhythm"
         find("IRREGULAR_RHYTHM", "Irregular rhythm (P waves not assessed)", "warning",
              f"RR variation {cv * 100:.0f}% over {len(rr)} intervals; possible atrial fibrillation or ectopy",
              _mark(rinfo, fs, *spans[max(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))], "Most irregular interval"))
     else:
         rhythm = "Regular rhythm"
+        if len(rr) >= 4 and cv > RR_CV_NEAR:
+            find("RR_VARIATION_BORDERLINE", "Borderline RR variation", "info",
+                 f"RR variation {cv * 100:.0f}% over {len(rr)} intervals (irregular above {RR_CV_IRREGULAR * 100:.0f}%)",
+                 _mark(rinfo, fs, *spans[max(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))], "Most irregular interval"),
+                 alert="review")
+    k = min(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))
+    typical = lambda: _mark(rinfo, fs, *spans[k], "Typical beat interval")
     if hr < HR_LOW:
-        k = min(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))
-        find("BRADYCARDIA", "Low heart rate", "warning", f"{hr} bpm (< {HR_LOW})",
-             _mark(rinfo, fs, *spans[k], "Typical beat interval"))
+        marked = hr < HR_URGENT_LOW
+        find("BRADYCARDIA", "Low heart rate" + (" (marked)" if marked else ""), "critical" if marked else "warning",
+             f"{hr} bpm (< {HR_LOW})", typical())
     elif hr >= HR_HIGH:
-        k = min(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))
-        find("TACHYCARDIA", "High heart rate", "warning", f"{hr} bpm (≥ {HR_HIGH})",
-             _mark(rinfo, fs, *spans[k], "Typical beat interval"))
+        marked = hr >= HR_URGENT_HIGH
+        find("TACHYCARDIA", "High heart rate" + (" (marked)" if marked else ""), "critical" if marked else "warning",
+             f"{hr} bpm (≥ {HR_HIGH})", typical())
+    elif hr < HR_LOW + HR_NEAR_BPM:
+        find("HEART_RATE_NEAR_LOW", "Heart rate close to the bradycardia limit", "info",
+             f"{hr} bpm (bradycardia < {HR_LOW})", typical(), alert="review")
+    elif hr >= HR_HIGH - HR_NEAR_BPM:
+        find("HEART_RATE_NEAR_HIGH", "Heart rate close to the tachycardia limit", "info",
+             f"{hr} bpm (tachycardia ≥ {HR_HIGH})", typical(), alert="review")
     if max(rr) > PAUSE_S:
-        find("PAUSE", "Pause", "warning", f"longest RR {max(rr):.1f} s (> {PAUSE_S} s)" + ("; clinically relevant (> 2 s)" if max(rr) > PAUSE_RELEVANT_S else ""),
+        relevant = max(rr) > PAUSE_RELEVANT_S
+        find("PAUSE", "Pause", "critical" if relevant else "warning",
+             f"longest RR {max(rr):.1f} s (> {PAUSE_S} s)" + ("; clinically relevant (> 2 s)" if relevant else ""),
              _mark(rinfo, fs, *spans[rr.index(max(rr))], "Longest pause"))
 
     # QRS duration and bundle branch block .
@@ -411,16 +437,19 @@ def diagnose(sex, fs, leads):
             rbbb = (notched("V1") or notched("V2")) and (wide_s("I") or wide_s("V6"))
             lbbb = (net.get("V1") is not None and net["V1"] < 0
                     and any((net.get(l) or 0) > 0 for l in ("I", "V6")) and not (septal_q("I") or septal_q("V6")))
-            if EXPERIMENTAL and rbbb and not lbbb:
-                find("RBBB_PATTERN", "Pattern suggestive of right bundle branch block", "warning",
-                     f"QRS {qrs} ms (≥ 120) with rSR'-type pattern in V1/V2 and wide S in I/V6", qrs_mark())
-            elif EXPERIMENTAL and lbbb and not rbbb:
-                find("LBBB_PATTERN", "Pattern suggestive of left bundle branch block", "warning",
-                     f"QRS {qrs} ms (≥ 120), negative V1, positive I/V6 without septal q", qrs_mark())
+            if rbbb and not lbbb:
+                find("RBBB_PATTERN", "Possible right bundle branch block pattern", "warning",
+                     f"QRS {qrs} ms (≥ 120) with rSR'-type pattern in V1/V2 and wide S in I/V6; {UNVALIDATED}", qrs_mark())
+            elif lbbb and not rbbb:
+                find("LBBB_PATTERN", "Possible left bundle branch block pattern", "warning",
+                     f"QRS {qrs} ms (≥ 120), negative V1, positive I/V6 without septal q; {UNVALIDATED}", qrs_mark())
             else:
                 find("WIDE_QRS", "Wide QRS (intraventricular conduction delay)", "warning", f"QRS {qrs} ms (≥ 120)", qrs_mark())
+            if hr >= HR_HIGH:
+                find("WIDE_QRS_TACHYCARDIA", "Wide-complex tachycardia", "critical",
+                     f"QRS {qrs} ms (≥ {WIDE_QRS_MS}) at {hr} bpm (≥ {HR_HIGH})", qrs_mark())
         elif qrs >= BORDERLINE_QRS_MS:
-            find("QRS_BORDERLINE", "Borderline QRS duration", "info", f"QRS {qrs} ms (110–119 ms range)", qrs_mark())
+            find("QRS_BORDERLINE", "Borderline QRS duration", "info", f"QRS {qrs} ms (110–119 ms range)", qrs_mark(), alert="review")
 
     # Axis from the net QRS area in I and aVF.
     axis = None
@@ -433,7 +462,9 @@ def diagnose(sex, fs, leads):
             _beat_mark(infos, fs, n, "area", f"QRS in lead {n}: net area {net[n] * 1000:+.0f} mV·ms", True)
             for n in ("I", "aVF")) if m] or None
         if -30 <= axis <= 90:
-            find("NORMAL_AXIS", "Normal electrical axis", "info", f"axis {axis}° (normal −30° to +90°); {axis_detail}", axis_mark(), axis_marks())
+            near = axis < -30 + AXIS_NEAR_DEG or axis > 90 - AXIS_NEAR_DEG
+            find("NORMAL_AXIS", "Normal electrical axis" + (", close to the limit" if near else ""), "info",
+                 f"axis {axis}° (normal −30° to +90°); {axis_detail}", axis_mark(), axis_marks(), alert="review" if near else None)
         elif -90 <= axis < -30:
             find("LEFT_AXIS_DEVIATION", "Left axis deviation", "warning", f"axis {axis}° (< −30°); {axis_detail}", axis_mark(), axis_marks())
         elif 90 < axis <= 180:
@@ -459,6 +490,12 @@ def diagnose(sex, fs, leads):
         lvh_lead, lvh_key = max(((n, k) for n, k in cands if amp[k].get(n) is not None), key=lambda c: amp[c[1]][c[0]])
         find("LVH_VOLTAGE", "Voltage criteria for left ventricular hypertrophy", "warning", "; ".join(lvh),
              _beat_mark_by_key(infos, fs, lvh_lead, lvh_key, f"Tallest {lvh_key.upper()} wave in {lvh_lead}"))
+    else:
+        near = [f"{n} {v} mV (limit {lim} mV)" for n, v, lim in (("Sokolow-Lyon", sok, SOKOLOW_MV), ("Cornell", cor, CORNELL_MV[sex]))
+                if v is not None and v > VOLTAGE_NEAR * lim]
+        if near:
+            find("LVH_VOLTAGE_BORDERLINE", "Voltage close to the left ventricular hypertrophy limit", "info",
+                 "; ".join(near), alert="review")
     if r_amp.get("V1") is not None and (s_amp.get("V5") is not None or s_amp.get("V6") is not None):
         rv = round(r_amp["V1"] + max(s_amp.get("V5") or 0, s_amp.get("V6") or 0), 2)
         if rv > RVH_MV and axis is not None and axis > 90:
@@ -471,23 +508,22 @@ def diagnose(sex, fs, leads):
     elev = {n for n, v in st.items() if v is not None and v >= (ST_ELEVATION_V2V3_MV[sex] if n in ("V2", "V3") else ST_ELEVATION_MV)}
     dep = {n for n, v in st.items() if v is not None and v <= -ST_DEPRESSION_MV}
     q = {n for n, i in infos.items() if n != "aVR" and (_stat(i, "q_ms") or 0) >= Q_MIN_MS and (_stat(i, "q_mv") or 0) >= Q_MIN_MV}
-    # ST/Q/BBB findings stay off in production until validated (EXPERIMENTAL is only set by the evaluation scripts).
-    if EXPERIMENTAL:
-        if _contiguous(elev):
-            lead = _best_lead(_contiguous(elev), lambda n: st.get(n))
-            find("ST_ELEVATION", "Possible ST elevation in contiguous leads", "critical",
-                 "leads " + ", ".join(_contiguous(elev)),
-                 _beat_mark(infos, fs, lead, "st", f"ST segment in {lead}", window=int(0.2 * fs)))
-        if _contiguous(dep):
-            lead = _best_lead(_contiguous(dep), lambda n: -st[n] if n in st else None)
-            find("ST_DEPRESSION", "Possible ST depression in contiguous leads", "warning",
-                 "leads " + ", ".join(_contiguous(dep)),
-                 _beat_mark(infos, fs, lead, "st", f"ST segment in {lead}", window=int(0.2 * fs)))
-        if _contiguous(q):
-            lead = _best_lead(_contiguous(q), lambda n: _stat(infos[n], "q_mv"))
-            find("PATHOLOGICAL_Q", "Possible pathological Q waves in contiguous leads", "warning",
-                 "leads " + ", ".join(_contiguous(q)),
-                 _beat_mark(infos, fs, lead, "q_mv", f"Q wave in {lead}"))
+    # ST/Q rules are not validated on photographed traces yet: reported as "possible" with a review alert.
+    if _contiguous(elev):
+        lead = _best_lead(_contiguous(elev), lambda n: st.get(n))
+        find("ST_ELEVATION", "Possible ST elevation in contiguous leads", "warning",
+             "leads " + ", ".join(_contiguous(elev)) + f"; {UNVALIDATED}",
+             _beat_mark(infos, fs, lead, "st", f"ST segment in {lead}", window=int(0.2 * fs)))
+    if _contiguous(dep):
+        lead = _best_lead(_contiguous(dep), lambda n: -st[n] if n in st else None)
+        find("ST_DEPRESSION", "Possible ST depression in contiguous leads", "warning",
+             "leads " + ", ".join(_contiguous(dep)) + f"; {UNVALIDATED}",
+             _beat_mark(infos, fs, lead, "st", f"ST segment in {lead}", window=int(0.2 * fs)))
+    if _contiguous(q):
+        lead = _best_lead(_contiguous(q), lambda n: _stat(infos[n], "q_mv"))
+        find("PATHOLOGICAL_Q", "Possible pathological Q waves in contiguous leads", "warning",
+             "leads " + ", ".join(_contiguous(q)) + f"; {UNVALIDATED}",
+             _beat_mark(infos, fs, lead, "q_mv", f"Q wave in {lead}"))
 
     per_lead = []
     for name in LEADS:
@@ -509,7 +545,15 @@ def diagnose(sex, fs, leads):
     headline = {"normal": "No abnormal pattern found in the criteria that could be checked",
                 "borderline": "No abnormal pattern found in the parts of the ECG that could be read",
                 "abnormal": "Possible abnormalities found; clinical review needed"}[classification]
+    reasons = [f["label"] for f in findings if f["alert_level"] != "ok"]
+    if partial:
+        reasons.append("Part of the ECG could not be read reliably")
+    alert = max([f["alert_level"] for f in findings] + ["review" if partial else "ok"], key=ALERT_ORDER.index)
+    alert_text = {"ok": "No sign of a problem in the criteria that could be checked",
+                  "review": "Possible problem: a person should review this ECG",
+                  "urgent": "Clear abnormality: review this ECG urgently"}[alert]
     summary = {"classification": classification, "headline": headline, "rhythm": rhythm, "heart_rate_bpm": hr,
+               "alert_level": alert, "alert_text": alert_text, "alert_reasons": reasons,
                "key_findings": [f["label"] for f in (abnormal or findings[:2])],
                "text": f"{rhythm}, heart rate {hr} bpm" + (f", QRS {qrs} ms" if qrs else "") + f". {headline}."}
     measurements = {
