@@ -226,8 +226,6 @@ def _warnings(geometry, grid, traces, names):
         label = name[:-6] if name.endswith('_longo') else name
         if float(trace['coverage']) < .90:
             out.append(warning('LEAD_PARTIAL_TRACE', lead=label))
-        if float(trace['unambiguous_fraction']) < .85:
-            out.append(warning('AMBIGUOUS_TRACE', lead=label))
     return out
 
 
