@@ -17,7 +17,7 @@ from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "interpretation"))  # diagnoser.py sits next to the handler
+sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "interpretation"))  # diagnoser.py sits next to the handler
 os.environ.setdefault("RESULTS_BUCKET", "results-test")
 os.environ.pop("MOCK_SCENARIO", None)
 
@@ -25,7 +25,7 @@ from ecg_contract import ERRORS, LAYOUTS, WARNINGS  # noqa: E402
 
 
 def _load(name, filename="handler.py"):
-    spec = importlib.util.spec_from_file_location(f"{name}_handler", os.path.join(ROOT, name, filename))
+    spec = importlib.util.spec_from_file_location(f"{name}_handler", os.path.join(os.path.dirname(ROOT) if name == "interpretation" else ROOT, name, filename))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

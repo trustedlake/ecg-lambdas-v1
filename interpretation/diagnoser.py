@@ -223,14 +223,18 @@ def _low_reason(i):
 
 
 def _walk(x, i, step, limit, thr, ref):
-    """Index where |x - ref| drops under thr moving from i by step, or None when the limit is reached first."""
+    """Index where the wave ends moving from i by step: |x - ref| under thr, a valley (the trace turns back up),
+    or the limit. None only when a hole in the trace is reached first."""
+    prev = abs(x[i] - ref)
     while i != limit:
         i += step
         if math.isnan(x[i]):
             return None
-        if abs(x[i] - ref) < thr:
+        cur = abs(x[i] - ref)
+        if cur < thr or cur > prev + 0.01:
             return i
-    return None
+        prev = min(prev, cur)
+    return limit
 
 
 def _delineate(info, fs):

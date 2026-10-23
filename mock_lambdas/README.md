@@ -8,7 +8,7 @@ to validate the app → backend → lambdas flow before the real algorithms (Ope
 | AWS function | Code | What it really does | What is synthetic |
 |---|---|---|---|
 | `ecg-reading` | `reading/mock_handler.py` | validates the payload, reads and decodes the photo from S3, draws the grid and trace over it, writes `overlay.png` and `signal.json` | the signal (72 bpm) and the grid position |
-| `ecg-interpretation` | `interpretation/handler.py` | validates sex and signal, measures HR and amplitudes on the received signal, applies sex-specific thresholds | PR, QRS, QT and axis |
+| `ecg-interpretation` | `../interpretation/handler.py` | validates sex and signal, measures HR and amplitudes on the received signal, applies sex-specific thresholds | PR, QRS, QT and axis |
 
 `ecg_contract/` (envelope, error/warning catalog, layouts) is copied into both packages and can be reused by the real lambdas.
 
