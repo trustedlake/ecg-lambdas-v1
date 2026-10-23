@@ -577,9 +577,35 @@ def diagnose(sex, fs, leads):
         "LVH_SOKOLOW_LYON": "Left ventricular hypertrophy (Sokolow-Lyon)",
         "LVH_CORNELL": "Left ventricular hypertrophy (Cornell)", "RVH": "Right ventricular hypertrophy",
         "ST_ELEVATION": "ST elevation", "ST_DEPRESSION": "ST depression", "PATHOLOGICAL_Q": "Pathological Q waves"}
-    checks = [{"code": c, "name": n, "status": "not_possible" if c in unchecked else "done",
-               **({"reason": unchecked[c]} if c in unchecked else {})} for c, n in check_names.items()]
-    checks += [{"code": c, "name": n, "status": "not_implemented", "reason": "cannot be measured reliably from a photographed trace"}
+    linked = {
+        "HEART_RATE": ("BRADYCARDIA", "TACHYCARDIA", "HEART_RATE_NEAR_LOW", "HEART_RATE_NEAR_HIGH"),
+        "RHYTHM_REGULARITY": ("IRREGULAR_RHYTHM", "RR_VARIATION_BORDERLINE"), "PAUSE": ("PAUSE",),
+        "QRS_DURATION": ("QRS_BORDERLINE", "WIDE_QRS", "WIDE_QRS_TACHYCARDIA"),
+        "BUNDLE_BRANCH_BLOCK": ("RBBB_PATTERN", "LBBB_PATTERN"),
+        "AXIS": ("NORMAL_AXIS", "LEFT_AXIS_DEVIATION", "RIGHT_AXIS_DEVIATION", "EXTREME_AXIS"),
+        "LVH_SOKOLOW_LYON": ("LVH_VOLTAGE", "LVH_VOLTAGE_BORDERLINE"), "LVH_CORNELL": ("LVH_VOLTAGE", "LVH_VOLTAGE_BORDERLINE"),
+        "RVH": ("RVH_PATTERN",), "ST_ELEVATION": ("ST_ELEVATION",), "ST_DEPRESSION": ("ST_DEPRESSION",),
+        "PATHOLOGICAL_Q": ("PATHOLOGICAL_Q",)}
+    values = {"HEART_RATE": hr and f"{hr} bpm", "RHYTHM_REGULARITY": rate_ok and rhythm, "PAUSE": rate_ok and f"longest RR {max(rr):.1f} s",
+              "QRS_DURATION": qrs and f"{qrs} ms", "AXIS": axis is not None and f"{axis}°",
+              "LVH_SOKOLOW_LYON": sok is not None and f"{sok} mV", "LVH_CORNELL": cor is not None and f"{cor} mV",
+              "RVH": rv is not None and f"{rv} mV"}
+
+    def check_entry(c, n):
+        if c in unchecked:
+            return {"code": c, "name": n, "status": "not_possible", "reason": unchecked[c], "alert_level": "review", "finding_codes": []}
+        mine = [f for f in findings if f["code"] in linked.get(c, ())]
+        # Only the LVH formula that is actually over its limit owns the shared LVH finding.
+        if c in ("LVH_SOKOLOW_LYON", "LVH_CORNELL"):
+            over = sok is not None and sok > SOKOLOW_MV if c == "LVH_SOKOLOW_LYON" else cor is not None and cor > CORNELL_MV[sex]
+            mine = [f for f in mine if f["code"] == "LVH_VOLTAGE" and over or f["code"] == "LVH_VOLTAGE_BORDERLINE"]
+        level = max([f["alert_level"] for f in mine] + ["ok"], key=ALERT_ORDER.index)
+        return {"code": c, "name": n, "status": "done", "alert_level": level, "finding_codes": [f["code"] for f in mine],
+                **({"value": values[c]} if values.get(c) else {})}
+
+    checks = [check_entry(c, n) for c, n in check_names.items()]
+    checks += [{"code": c, "name": n, "status": "not_implemented", "alert_level": "ok", "finding_codes": [],
+                "reason": "cannot be measured reliably from a photographed trace"}
                for c, n in (("PR_AV_BLOCK", "PR interval / AV block"), ("QT_QTC", "QT / QTc"), ("P_WAVE", "P wave"))]
 
     abnormal = [f for f in findings if f["severity"] != "info"]
