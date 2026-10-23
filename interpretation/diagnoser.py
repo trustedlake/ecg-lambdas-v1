@@ -896,7 +896,8 @@ def diagnose(sex, fs, leads):
     checks = [check_entry(c, n) for c, n in check_names.items()]
 
     abnormal = [f for f in findings if f["severity"] != "info"]
-    partial = qrs_conf == "low" or len(per_lead) < 12 or any(c in unchecked for c in check_names)
+    uncertain_leads = [l["name"] for l in leads if l.get("signal_source") == "traced_unvalidated"]
+    partial = qrs_conf == "low" or len(per_lead) < 12 or any(c in unchecked for c in check_names) or bool(uncertain_leads)
     classification = "abnormal" if abnormal else ("borderline" if partial else "normal")
     headline = {"normal": "No abnormal pattern found in the criteria that could be checked",
                 "borderline": "No abnormal pattern found in the parts of the ECG that could be read",
@@ -904,6 +905,8 @@ def diagnose(sex, fs, leads):
     reasons = [f["label"] for f in findings if f["alert_level"] != "ok"]
     if partial:
         reasons.append("Part of the ECG could not be read reliably")
+    if uncertain_leads:
+        reasons.append(f"Uncertain trace used (not validated by the reader): {', '.join(sorted(set(uncertain_leads)))}")
     reasons += [f"Could not check: {check_names[c]} ({r})" for c, r in unchecked.items()]
     alert = max([f["alert_level"] for f in findings] + ["review" if partial else "ok"], key=ALERT_ORDER.index)
     alert_text = {"ok": "No sign of a problem in the criteria that could be checked",

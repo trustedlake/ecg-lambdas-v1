@@ -192,6 +192,12 @@ def _lead_export(result, arrays, grid, cal, layout):
         original_name = record['name']
         values = arrays[original_name + '__analysis_mv']
         samples = _safe_json(np.asarray(values, dtype=float).tolist())
+        uncertain = False
+        if sum(v is not None for v in samples) < fs:
+            # Under 1 s marked valid: fall back to the traced line, flagged so interpretation treats it as uncertain.
+            traced = _safe_json(np.asarray(arrays[original_name + '__amplitude_mv'], dtype=float).tolist())
+            if sum(v is not None for v in traced) >= fs:
+                samples, uncertain = traced, True
         if not samples or all(v is None for v in samples):
             continue
         rhythm = original_name.endswith('_longo')
@@ -204,7 +210,8 @@ def _lead_export(result, arrays, grid, cal, layout):
             'start_s': 0.0 if rhythm else round(col * 10.0/columns, 4),
             'duration_s': round(len(samples)/fs, 4),
             'coverage': round(sum(v is not None for v in samples)/len(samples), 4),
-            'quality': 'good' if sum(v is not None for v in samples)/len(samples) >= .90 else 'partial',
+            'quality': 'uncertain' if uncertain else 'good' if sum(v is not None for v in samples)/len(samples) >= .90 else 'partial',
+            'signal_source': 'traced_unvalidated' if uncertain else 'analysis',
             'bbox_px': _safe_json(record['box']),
             'baseline_y_px': float(record['baseline_y_px']),
             'x_px': _px_list(arrays.get(original_name + '__x_px')),
