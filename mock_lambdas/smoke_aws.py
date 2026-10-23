@@ -24,11 +24,11 @@ READING, INTERPRETATION = "ecg-reading", "ecg-interpretation"
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", help="ECG photo (JPG/PNG); without it a synthetic image is used")
-    parser.add_argument("--profile", default="trustedlake")
+    parser.add_argument("--profile", default="trustedlake", help="empty = default credentials (CodeBuild)")
     parser.add_argument("--region", default="us-east-1")
     args = parser.parse_args()
 
-    session = boto3.Session(profile_name=args.profile, region_name=args.region)
+    session = boto3.Session(profile_name=args.profile or None, region_name=args.region)
     s3 = session.client("s3", config=Config(signature_version="s3v4"))
     lam = session.client("lambda", config=Config(read_timeout=900, retries={"max_attempts": 0}))  # a real read takes minutes
     if args.image:
