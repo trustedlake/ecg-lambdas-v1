@@ -62,7 +62,7 @@ def mock_read(event, env, layout, calibration, source):
     prefix = f'reading/{env.request_id}/{uuid.uuid4().hex}/mock/'
     mime = {'.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp'}[suffix]
     image = _file(prefix + 'preview' + suffix, raw, mime)
-    leads = _file(prefix + 'leads.json', _json({'leads': _leads(layout)}), 'application/json')
+    leads = _file(prefix + 'leads.json', _json({'sampling_rate_hz': RATE_HZ, 'units': 'mV', 'leads': _leads(layout)}), 'application/json')
     best = max(METHOD_ROWS, key=lambda r: r[2])[0]
     rows = []
     for name, version, score in METHOD_ROWS:

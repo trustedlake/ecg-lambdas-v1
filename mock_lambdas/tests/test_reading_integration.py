@@ -118,6 +118,8 @@ class RealContractTests(unittest.TestCase):
                 leads = json.loads(self.client.objects[methods[0]['files']['leads']['bucket'],
                                                        methods[0]['files']['leads']['key']])
                 self.assertEqual(len(leads['leads']), 13)
+                self.assertEqual(leads['units'], 'mV')  # the interpretation requires the signal envelope
+                self.assertGreater(leads['sampling_rate_hz'], 0)
         response = self.call(mock={'scenario': 'refused'})
         self.assertEqual(response['status'], 'REFUSED')
         response = self.call(mock={'scenario': 'failure'})
