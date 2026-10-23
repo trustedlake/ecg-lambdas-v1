@@ -355,7 +355,7 @@ def diagnose(sex, fs, leads):
 
     # Rate and rhythm: longest strip (lead II preferred on ties).
     longest = max(leads, key=lambda l: (sum(v is not None for v in l["samples"]), l["name"] == "II"))
-    x = _clean(longest["samples"])
+    x = _bridge_short_gaps(_clean(longest["samples"]), max(int(MAX_BRIDGED_GAP_S * fs), 1))
     peaks = detect_beats(x, fs)
     spans = [(a, b) for a, b in zip(peaks, peaks[1:]) if not _has_gap(x, a, b)]
     rr = [(b - a) / fs for a, b in spans]
