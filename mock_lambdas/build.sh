@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 rm -rf build
 mkdir -p build/interpretation
-cp interpretation/handler.py interpretation/diagnoser.py build/interpretation/
+cp ../interpretation/handler.py ../interpretation/diagnoser.py build/interpretation/
 cp -R ecg_contract build/interpretation/
 find build -name '__pycache__' -prune -exec rm -rf {} +
 echo "ok: $(du -sh build/interpretation | cut -f1) interpretation"
