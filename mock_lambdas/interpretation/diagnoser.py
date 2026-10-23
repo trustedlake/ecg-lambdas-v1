@@ -105,6 +105,18 @@ def detect_beats(x, fs):
     if peaks:
         med = _median([abs(xb[p]) for p in peaks])
         peaks = [p for p in peaks if abs(xb[p]) >= 0.35 * med]
+    # A beat closer than half the typical interval to its neighbour is a double detection
+    # (typically a wide T wave next to the QRS): keep the steeper of the two, which is the QRS.
+    if len(peaks) >= 4:
+        typical = _median([b - a for a, b in zip(peaks, peaks[1:])])
+        merged = [peaks[0]]
+        for p in peaks[1:]:
+            if p - merged[-1] < 0.5 * typical:
+                if env[p] > env[merged[-1]]:
+                    merged[-1] = p
+            else:
+                merged.append(p)
+        peaks = merged
     return peaks
 
 
