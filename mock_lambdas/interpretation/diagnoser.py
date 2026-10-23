@@ -25,7 +25,7 @@ WIDE_QRS_MS, BORDERLINE_QRS_MS = 120, 110
 SOKOLOW_MV = 3.5
 CORNELL_MV = {"F": 2.0, "M": 2.8}
 RVH_MV = 1.05
-HR_LOW, HR_HIGH, PAUSE_S = 50, 100, 2.0
+HR_LOW, HR_HIGH, PAUSE_S, PAUSE_RELEVANT_S = 50, 100, 1.5, 2.0
 NAN = float("nan")
 MAX_BRIDGED_GAP_S = 0.02   # gaps up to 20 ms are bridged for QRS measurement only
 EXPERIMENTAL = os.environ.get("ECG_EXPERIMENTAL") == "1"   # local evaluation only; never set in production
@@ -385,7 +385,7 @@ def diagnose(sex, fs, leads):
         find("TACHYCARDIA", "High heart rate", "warning", f"{hr} bpm (≥ {HR_HIGH})",
              _mark(rinfo, fs, *spans[k], "Typical beat interval"))
     if max(rr) > PAUSE_S:
-        find("PAUSE", "Pause", "warning", f"longest RR {max(rr):.1f} s (> {PAUSE_S:.0f} s)",
+        find("PAUSE", "Pause", "warning", f"longest RR {max(rr):.1f} s (> {PAUSE_S} s)" + ("; clinically relevant (> 2 s)" if max(rr) > PAUSE_RELEVANT_S else ""),
              _mark(rinfo, fs, *spans[rr.index(max(rr))], "Longest pause"))
 
     # QRS duration and bundle branch block .
