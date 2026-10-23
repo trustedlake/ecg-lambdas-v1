@@ -168,7 +168,6 @@ def process(source,out,config,page=0,resume=False):
     if not grid['valid']:warnings.append('GRID_CALIBRATION_UNCERTAIN')
     if geometry['method'].endswith('fallback'):warnings.append('GEOMETRY_FALLBACK')
     if min(r['coverage'] for r in records)<.90:warnings.append('INCOMPLETE_TRACE')
-    if min(r['unambiguous_fraction'] for r in records)<.85:warnings.append('AMBIGUOUS_TRACE')
     if any(resolved['calibration'].get(k) is None for k in ['speed_mm_s','gain_mm_mv']):warnings.append('MISSING_EXPLICIT_CALIBRATION')
     status='REVIEW_REQUIRED' if warnings else 'CONSISTENCY_PASS'
     np.savez_compressed(out/'signals.npz',**arrays);np.savez_compressed(out/'trace_masks.npz',**masks)

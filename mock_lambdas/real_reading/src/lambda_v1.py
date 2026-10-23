@@ -263,6 +263,9 @@ def _method_run(name, method, image, geometry, grid, config, base):
     warnings = []
     try:
         result = method.extract(Context(image, deepcopy(config), deepcopy(geometry), deepcopy(grid)))
+        from ecg.peak_tips import extend_tips
+        for _trace in result.traces:
+            extend_tips(_trace)
         integrity = result.validate(image.shape)
         gate = result.diagnostics.get('color_gate')
         if gate is None:
