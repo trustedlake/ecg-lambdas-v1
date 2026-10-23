@@ -343,9 +343,10 @@ def diagnose(sex, fs, leads):
     """leads: [{"name", "samples"}] -> (summary, details, warnings). Raises NoQrs / TooNoisy."""
     warnings, findings, criteria = [], [], []
 
-    def find(code, label, severity, evidence, mark=None):
+    def find(code, label, severity, evidence, mark=None, marks=None):
+        # `mark` is the primary evidence window; `marks` lists every window the finding is based on.
         findings.append({"code": code, "label": label, "severity": severity, "evidence": evidence,
-                         **({"mark": mark} if mark else {})})
+                         **({"mark": mark} if mark else {}), **({"marks": marks} if marks else {})})
 
     infos = {}
     for lead in leads:
@@ -426,14 +427,18 @@ def diagnose(sex, fs, leads):
         axis = round(math.degrees(math.atan2(net["aVF"], net["I"])))
         axis_lead = "I" if abs(net["I"]) >= abs(net["aVF"]) else "aVF"
         axis_mark = lambda: _beat_mark(infos, fs, axis_lead, "area", f"QRS in lead {axis_lead}", True)
+        axis_detail = f"net QRS area I {net['I'] * 1000:+.0f} mV·ms, aVF {net['aVF'] * 1000:+.0f} mV·ms"
+        axis_marks = lambda: [m for m in (
+            _beat_mark(infos, fs, n, "area", f"QRS in lead {n}: net area {net[n] * 1000:+.0f} mV·ms", True)
+            for n in ("I", "aVF")) if m] or None
         if -30 <= axis <= 90:
-            find("NORMAL_AXIS", "Normal electrical axis", "info", f"axis {axis}° (−30° to +90°)", axis_mark())
+            find("NORMAL_AXIS", "Normal electrical axis", "info", f"axis {axis}° (normal −30° to +90°); {axis_detail}", axis_mark(), axis_marks())
         elif -90 <= axis < -30:
-            find("LEFT_AXIS_DEVIATION", "Left axis deviation", "warning", f"axis {axis}° (< −30°)", axis_mark())
+            find("LEFT_AXIS_DEVIATION", "Left axis deviation", "warning", f"axis {axis}° (< −30°); {axis_detail}", axis_mark(), axis_marks())
         elif 90 < axis <= 180:
-            find("RIGHT_AXIS_DEVIATION", "Right axis deviation", "warning", f"axis {axis}° (> +90°)", axis_mark())
+            find("RIGHT_AXIS_DEVIATION", "Right axis deviation", "warning", f"axis {axis}° (> +90°); {axis_detail}", axis_mark(), axis_marks())
         else:
-            find("EXTREME_AXIS", "Extreme axis deviation", "warning", f"axis {axis}° (−90° to −180°)", axis_mark())
+            find("EXTREME_AXIS", "Extreme axis deviation", "warning", f"axis {axis}° (−90° to −180°); {axis_detail}", axis_mark(), axis_marks())
 
     # Voltage criteria .
     sok = cor = None
@@ -483,8 +488,6 @@ def diagnose(sex, fs, leads):
                  "leads " + ", ".join(_contiguous(q)),
                  _beat_mark(infos, fs, lead, "q_mv", f"Q wave in {lead}"))
 
-    warnings.append({"code": "MEASUREMENT_UNRELIABLE",
-                     "message": "PR, QT, ST and Q-wave findings are not reported: they cannot be located reliably on an extracted trace."})
     per_lead = []
     for name in LEADS:
         if name not in infos:
@@ -503,7 +506,7 @@ def diagnose(sex, fs, leads):
     partial = qrs_conf == "low" or len(per_lead) < 12
     classification = "abnormal" if abnormal else ("borderline" if partial else "normal")
     headline = {"normal": "No abnormal pattern found in the criteria that could be checked",
-                "borderline": "No abnormal pattern found, but only part of the ECG could be checked",
+                "borderline": "No abnormal pattern found in the parts of the ECG that could be read",
                 "abnormal": "Possible abnormalities found; clinical review needed"}[classification]
     summary = {"classification": classification, "headline": headline, "rhythm": rhythm, "heart_rate_bpm": hr,
                "key_findings": [f["label"] for f in (abnormal or findings[:2])],
