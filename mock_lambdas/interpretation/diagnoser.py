@@ -22,12 +22,20 @@ CONTIGUOUS = {frozenset(p) for p in (("aVL", "I"), ("II", "aVF"), ("aVF", "III")
 ST_ELEVATION_MV = 0.1
 ST_ELEVATION_V2V3_MV = {"F": 0.15, "M": 0.2}   # men >= 40 y; age is not provided
 ST_DEPRESSION_MV = 0.05
-Q_MIN_MS, Q_MIN_MV = 30, 0.1
+Q_MIN_MS, Q_MIN_MV = 40, 0.1
 WIDE_QRS_MS, BORDERLINE_QRS_MS = 120, 110
 SOKOLOW_MV = 3.5
 CORNELL_MV = {"F": 2.0, "M": 2.8}
 RVH_MV = 1.05
 HR_LOW, HR_HIGH, PAUSE_S, PAUSE_RELEVANT_S = 50, 100, 1.5, 2.0
+P_MIN_MV = 0.04
+PR_LOW_MS, PR_HIGH_MS = 120, 200
+QTC_HIGH_MS = {"M": 450, "F": 470}
+QTC_SHORT_MS, QT_NEAR_MS = 340, 20
+T_INVERSION_MV, T_TALL_MV = 0.1, 1.0
+LOW_VOLT_LIMB_MV, LOW_VOLT_PRECORDIAL_MV = 0.5, 1.0
+R_V3_MIN_MV = 0.3
+BRUGADA_ST_MV = 0.2
 NAN = float("nan")
 MAX_BRIDGED_GAP_S = 0.02   # gaps up to 20 ms are bridged for QRS measurement only
 # Alert levels: "urgent" = clear, time-sensitive abnormality; "review" = any sign a person should
@@ -214,6 +222,50 @@ def _low_reason(i):
             f"({i['dropped_gap']} cut by holes in the trace, {i['dropped_shape']} with no clear QRS shape)")
 
 
+def _walk(x, i, step, limit, thr, ref):
+    """Index where |x - ref| drops under thr moving from i by step, or None when the limit is reached first."""
+    while i != limit:
+        i += step
+        if math.isnan(x[i]):
+            return None
+        if abs(x[i] - ref) < thr:
+            return i
+    return None
+
+
+def _delineate(info, fs):
+    """P wave, T wave and pacing spike per usable beat (None when the window is cut by a hole or too short)."""
+    x, beats, n = info["x"], info["beats"], len(info["x"])
+    for k, b in enumerate(beats):
+        on, off, ref = b["on"], b["off"], b["ref"]
+        nxt = beats[k + 1]["on"] if k + 1 < len(beats) else n - 1
+        prev_off = beats[k - 1]["off"] if k else 0
+        b.update(p_amp=None, p_ms=None, pr_ms=None, p_lo=None, p_hi=None, t_amp=None, t_lo=None, t_hi=None, qt_ms=None, spike=False)
+        lo, hi = max(on - int(0.28 * fs), prev_off + int(0.12 * fs)), on - int(0.03 * fs)
+        if hi - lo >= int(0.06 * fs) and not _has_gap(x, lo, hi):
+            pk = max(range(lo, hi + 1), key=lambda i: abs(x[i] - ref))
+            amp = x[pk] - ref
+            if abs(amp) < P_MIN_MV:
+                b["p_amp"] = 0.0
+            else:
+                p_on, p_off = _walk(x, pk, -1, lo, 0.25 * abs(amp), ref), _walk(x, pk, 1, hi, 0.25 * abs(amp), ref)
+                if p_on is not None and p_off is not None:
+                    b.update(p_amp=amp, p_ms=1000 * (p_off - p_on) / fs, pr_ms=1000 * (on - p_on) / fs, p_lo=p_on, p_hi=p_off)
+        lo, hi = off + int(0.06 * fs), min(off + int(0.5 * fs), nxt - int(0.2 * fs))
+        if hi - lo >= int(0.08 * fs) and hi < n and not _has_gap(x, lo, hi):
+            pk = max(range(lo, hi + 1), key=lambda i: abs(x[i] - ref))
+            amp = x[pk] - ref
+            b.update(t_amp=amp, t_lo=lo, t_hi=hi)
+            if abs(amp) >= 0.05:
+                t_end = _walk(x, pk, 1, hi, 0.2 * abs(amp), ref)
+                if t_end is not None:
+                    b["qt_ms"] = 1000 * (t_end - on) / fs
+                    b["t_hi"] = t_end
+        w0, w1 = max(on - int(0.04 * fs), 3), on + int(0.02 * fs)
+        b["spike"] = any(abs(x[i] - x[i - 1]) >= 0.4 and abs(x[i - 3] - ref) < 0.15
+                         for i in range(w0, min(w1, n)) if not math.isnan(x[i]) and not math.isnan(x[i - 1]) and not math.isnan(x[i - 3]))
+
+
 def analyse_lead(name, samples, fs, px=None):
     x = _clean(samples)
     valid = [v for v in x if not math.isnan(v)]
@@ -252,11 +304,12 @@ def analyse_lead(name, samples, fs, px=None):
                     break
             q_ms, q_mv = 1000 * neg / fs, -min(rel)
         info["beats"].append({
-            "peak": p, "on": on, "off": off,
+            "peak": p, "on": on, "off": off, "ref": ref,
             "bridged": any(math.isnan(info["raw"][t]) for t in range(on, off + 1)),
             "dur_ms": 1000 * (off - on) / fs, "r": r, "s": s, "area": sum(v - ref for v in seg) / fs,
             "st": (sum(stv) / len(stv) - ref) if stv else None, "q_ms": q_ms, "q_mv": q_mv,
             "notches": _count_peaks([v - ref for v in seg], 0.2 * max(r, s, 0.05))})
+    _delineate(info, fs)
     return info
 
 
@@ -325,6 +378,15 @@ def _beat_mark(infos, fs, lead, key, label, absolute=False, window=None):
 
 def _beat_mark_by_key(infos, fs, lead, key, label):
     return _beat_mark(infos, fs, lead, key, label)
+
+
+def _range_mark(infos, fs, lead, key, label, lo_key, hi_key, absolute=False):
+    """Evidence window from beat[lo_key] to beat[hi_key] of the beat closest to the lead's median `key`."""
+    info = infos.get(lead)
+    beat = _beat_near_median(info, key, absolute) if info else None
+    if not beat or beat.get(lo_key) is None or beat.get(hi_key) is None:
+        return None
+    return _mark(info, fs, beat[lo_key], beat[hi_key], label)
 
 
 def _best_lead(leads, score):
@@ -547,6 +609,218 @@ def diagnose(sex, fs, leads):
              "leads " + ", ".join(_contiguous(q)) + f"; {UNVALIDATED}",
              _beat_mark(infos, fs, lead, "q_mv", f"Q wave in {lead}"))
 
+    # Additional checks (P wave, PR, QT, T wave, ectopy, ...): all rules are unvalidated on photographed traces.
+    extra_reason = {}   # check code -> reason it could not be done
+    values_extra = {}
+    sex_word = "female" if sex == "F" else "male"
+    pr = p_ms = qt = qtc = None
+
+    def lead_stat(key):
+        return {n: _stat(i, key) for n, i in infos.items() if _stat(i, key) is not None}
+
+    # P wave, PR interval, AV block, atrial enlargement, pre-excitation.
+    cand = [n for n in ("II", "I", "aVF", "V5", "V2", "V1") if n in infos]
+    counts = {n: sum(1 for b in infos[n]["beats"] if b["p_amp"] is not None) for n in cand}
+    p_lead = max(counts, key=counts.get) if counts and max(counts.values()) >= 3 else None
+    if p_lead is None:
+        for c in ("P_WAVE", "PR_AV_BLOCK", "ATRIAL_ENLARGEMENT", "PRE_EXCITATION"):
+            extra_reason[c] = "too few heartbeats with a clean stretch before the QRS to look for a P wave"
+    else:
+        pb = [b for b in infos[p_lead]["beats"] if b["p_amp"] is not None]
+        seen = [b for b in pb if b["p_amp"] != 0.0]
+        frac = len(seen) / len(pb)
+        pr_list = [b["pr_ms"] for b in seen]
+        pr = round(_median(pr_list)) if pr_list else None
+        p_ms = round(_median([b["p_ms"] for b in seen])) if seen else None
+        p_amp = _median([abs(b["p_amp"]) for b in seen]) if seen else None
+        values_extra["P_WAVE"] = f"P seen in {round(frac * 100)}% of beats ({p_lead})"
+        if frac < 0.5:
+            pre_mark = _beat_mark(infos, fs, p_lead, "r", f"Stretch before the QRS in {p_lead}")
+            if rhythm == "Irregular rhythm":
+                find("AFIB_POSSIBLE", "Possible atrial fibrillation (irregular rhythm without clear P waves)", "warning",
+                     f"P wave seen in only {round(frac * 100)}% of beats in {p_lead}; {UNVALIDATED}", pre_mark)
+            else:
+                find("P_WAVE_ABSENT", "No clear P wave before the QRS", "warning",
+                     f"P wave seen in only {round(frac * 100)}% of beats in {p_lead} (poor trace or non-sinus rhythm); {UNVALIDATED}", pre_mark)
+        if pr is None:
+            for c in ("PR_AV_BLOCK", "ATRIAL_ENLARGEMENT", "PRE_EXCITATION"):
+                extra_reason[c] = "no clear P wave to measure from"
+        else:
+            values_extra["PR_AV_BLOCK"] = f"PR {pr} ms"
+            pr_mark = lambda l: _range_mark(infos, fs, p_lead, "pr_ms", l, "p_lo", "on")
+            if pr > PR_HIGH_MS:
+                find("FIRST_DEGREE_AV_BLOCK", "Possible first-degree AV block (long PR)", "warning",
+                     f"PR {pr} ms (> {PR_HIGH_MS}); {UNVALIDATED}", pr_mark("PR interval"))
+            elif pr < PR_LOW_MS:
+                find("SHORT_PR", "Short PR interval", "warning", f"PR {pr} ms (< {PR_LOW_MS}); {UNVALIDATED}", pr_mark("PR interval"))
+            elif pr > PR_HIGH_MS - 10 or pr < PR_LOW_MS + 10:
+                find("PR_BORDERLINE", "PR interval close to a limit", "info", f"PR {pr} ms (normal {PR_LOW_MS}-{PR_HIGH_MS})",
+                     pr_mark("PR interval"), alert="review")
+            if len(pr_list) >= 4 and statistics.pstdev(pr_list) > 40:
+                find("AV_BLOCK_HIGH_GRADE", "Possible 2nd/3rd-degree AV block (PR interval varies between beats)", "warning",
+                     f"PR varies by ±{statistics.pstdev(pr_list):.0f} ms across {len(pr_list)} beats; {UNVALIDATED}", pr_mark("PR interval"))
+            values_extra["PRE_EXCITATION"] = f"PR {pr} ms" + (f", QRS {qrs} ms" if qrs else "")
+            if qrs is None:
+                extra_reason["PRE_EXCITATION"] = "QRS duration could not be measured"
+            elif pr < PR_LOW_MS and qrs >= BORDERLINE_QRS_MS:
+                find("PRE_EXCITATION_PATTERN", "Possible pre-excitation (short PR with wide QRS)", "warning",
+                     f"PR {pr} ms and QRS {qrs} ms; {UNVALIDATED}", pr_mark("PR interval"))
+            values_extra["ATRIAL_ENLARGEMENT"] = f"P {p_ms} ms, {p_amp:.2f} mV"
+            if p_ms and p_ms > 120:
+                find("LEFT_ATRIAL_ENLARGEMENT", "Possible left atrial enlargement (long P wave)", "warning",
+                     f"P duration {p_ms} ms (> 120) in {p_lead}; {UNVALIDATED}", _range_mark(infos, fs, p_lead, "p_ms", "P wave", "p_lo", "p_hi"))
+            if p_amp is not None and p_amp >= 0.25:
+                find("RIGHT_ATRIAL_ENLARGEMENT", "Possible right atrial enlargement (tall P wave)", "warning",
+                     f"P amplitude {p_amp:.2f} mV (≥ 0.25) in {p_lead}; {UNVALIDATED}",
+                     _range_mark(infos, fs, p_lead, "p_amp", "P wave", "p_lo", "p_hi", True))
+        # Extra P waves between beats (2nd/3rd-degree block): a P-sized bump after the T wave, before the next P.
+        bs, x_p, extra_p = infos[p_lead]["beats"], infos[p_lead]["x"], 0
+        for a, b in zip(bs, bs[1:]):
+            lo = (a["t_hi"] or a["off"] + int(0.45 * fs)) + int(0.04 * fs)
+            hi = b["on"] - int(0.32 * fs)
+            if hi - lo >= int(0.1 * fs) and not _has_gap(x_p, lo, hi):
+                base = (x_p[lo] + x_p[hi]) / 2
+                pk = max(range(lo, hi + 1), key=lambda i: abs(x_p[i] - base))
+                if abs(x_p[pk] - base) >= 0.06 and lo < pk < hi:
+                    extra_p += 1
+        if extra_p >= 2:
+            find("AV_BLOCK_EXTRA_P", "Possible 2nd/3rd-degree AV block (P waves without a QRS)", "warning",
+                 f"extra P-like waves between {extra_p} beat pairs in {p_lead}; {UNVALIDATED}")
+
+    # QT / QTc (Bazett, median RR).
+    qts = lead_stat("qt_ms")
+    if len(qts) < 3:
+        extra_reason["QT_QTC"] = "T wave end could not be found in enough leads"
+    elif not rate_ok:
+        extra_reason["QT_QTC"] = "heart rate needed for QTc could not be measured"
+    else:
+        vals = sorted(qts.values())
+        qt = round(vals[min(int(0.75 * len(vals)), len(vals) - 1)])
+        qtc = round(qt / math.sqrt(_median(rr)))
+        values_extra["QT_QTC"] = f"QT {qt} ms, QTc {qtc} ms"
+        qt_lead = _best_lead(qts, lambda n: -abs(qts[n] - qt))
+        qt_mark = lambda: _range_mark(infos, fs, qt_lead, "qt_ms", f"QT interval in {qt_lead}", "on", "t_hi")
+        lim = QTC_HIGH_MS[sex]
+        if qtc > lim:
+            find("LONG_QT", "Possible long QT", "warning", f"QTc {qtc} ms (> {lim} ms, {sex_word}); {UNVALIDATED}", qt_mark())
+        elif qtc < QTC_SHORT_MS:
+            find("SHORT_QT", "Possible short QT", "warning", f"QTc {qtc} ms (< {QTC_SHORT_MS} ms); {UNVALIDATED}", qt_mark())
+        elif qtc > lim - QT_NEAR_MS or qtc < QTC_SHORT_MS + QT_NEAR_MS:
+            find("QT_BORDERLINE", "QTc close to a limit", "info", f"QTc {qtc} ms (normal {QTC_SHORT_MS}-{lim})", qt_mark(), alert="review")
+
+    # T wave.
+    t_amp = lead_stat("t_amp")
+    if len(t_amp) < 4:
+        extra_reason["T_WAVE"] = "T wave could not be measured in enough leads"
+    else:
+        inv = {n for n, v in t_amp.items() if v <= -T_INVERSION_MV and n not in ("aVR", "III", "V1")}
+        tall = {n for n, v in t_amp.items() if v >= T_TALL_MV and n != "aVR"}
+        values_extra["T_WAVE"] = f"{len(t_amp)} leads measured"
+        for code, label, group, pick in (
+                ("T_INVERSION", "Possible T-wave inversion in contiguous leads", inv, lambda n: -t_amp[n]),
+                ("TALL_T_WAVES", "Possible tall (hyperacute) T waves in contiguous leads", tall, lambda n: t_amp[n])):
+            lead_set = _contiguous(group)
+            if lead_set:
+                lead = _best_lead(lead_set, pick)
+                find(code, label, "warning", "leads " + ", ".join(lead_set) + f"; {UNVALIDATED}",
+                     _range_mark(infos, fs, lead, "t_amp", f"T wave in {lead}", "t_lo", "t_hi", True))
+
+    # Ectopic beats: premature beats; wide ones look ventricular.
+    if not rate_ok or len(rr) < 4:
+        extra_reason["ECTOPIC_BEATS"] = "not enough regular beats on the longest strip to look for early beats"
+    else:
+        med_rr = _median(rr)
+        early = [k for k in range(len(rr)) if rr[k] < 0.8 * med_rr]
+        values_extra["ECTOPIC_BEATS"] = f"{len(early)} early beat(s)"
+        if early:
+            durs = []
+            for a, b in spans:
+                bd = _qrs_bounds(x, b, fs)
+                durs.append(1000 * (bd[1] - bd[0]) / fs if bd else None)
+            ok_d = [d for d in durs if d]
+            typical_d = _median(ok_d) if ok_d else None
+            wide = [k for k in early if durs[k] and typical_d and (durs[k] >= WIDE_QRS_MS or durs[k] > 1.25 * typical_d)]
+            if wide:
+                find("PVC_POSSIBLE", "Possible premature ventricular beat(s)", "warning",
+                     f"{len(wide)} early beat(s) with a wider QRS than the others; {UNVALIDATED}", _mark(rinfo, fs, *spans[wide[0]], "Early wide beat"))
+            else:
+                find("PAC_POSSIBLE", "Possible premature atrial/junctional beat(s)", "warning",
+                     f"{len(early)} early beat(s) (RR < 80% of typical); {UNVALIDATED}", _mark(rinfo, fs, *spans[early[0]], "Early beat"))
+
+    # Low voltage and R-wave progression.
+    limb = {n: r_amp[n] + s_amp[n] for n in ("I", "II", "III", "aVR", "aVL", "aVF") if r_amp.get(n) is not None and s_amp.get(n) is not None}
+    prec = {n: r_amp[n] + s_amp[n] for n in ("V1", "V2", "V3", "V4", "V5", "V6") if r_amp.get(n) is not None and s_amp.get(n) is not None}
+    if len(limb) < 4 or len(prec) < 4:
+        extra_reason["LOW_VOLTAGE"] = "QRS amplitude could not be measured in enough leads"
+    else:
+        values_extra["LOW_VOLTAGE"] = f"largest limb {max(limb.values()):.2f} mV, precordial {max(prec.values()):.2f} mV"
+        lowl, lowp = max(limb.values()) < LOW_VOLT_LIMB_MV, max(prec.values()) < LOW_VOLT_PRECORDIAL_MV
+        if lowl or lowp:
+            grp = limb if lowl else prec
+            lead = max(grp, key=grp.get)
+            find("LOW_VOLTAGE", "Low QRS voltage", "warning",
+                 ("limb leads all < 0.5 mV" if lowl else "precordial leads all < 1.0 mV") + f" (largest {grp[lead]:.2f} mV in {lead}); {UNVALIDATED}",
+                 _beat_mark(infos, fs, lead, "r", f"QRS in {lead}"))
+    if r_amp.get("V3") is None or r_amp.get("V2") is None:
+        extra_reason["R_PROGRESSION"] = "R waves in V2/V3 could not be measured"
+    else:
+        values_extra["R_PROGRESSION"] = f"R V3 {r_amp['V3']:.2f} mV"
+        late = all((r_amp.get(n) or 0) < (s_amp.get(n) or 0) for n in ("V1", "V2", "V3", "V4", "V5") if r_amp.get(n) is not None)
+        if r_amp["V3"] < R_V3_MIN_MV or late:
+            find("POOR_R_PROGRESSION", "Possible poor R-wave progression in the precordial leads", "warning",
+                 f"R in V3 {r_amp['V3']:.2f} mV (< {R_V3_MIN_MV})" + ("; S larger than R through V5" if late else "") + f"; {UNVALIDATED}",
+                 _beat_mark(infos, fs, "V3", "r", "QRS in V3"))
+
+    # Fascicular blocks (from axis and QRS width).
+    if axis is None or qrs is None:
+        extra_reason["FASCICULAR_BLOCK"] = "axis or QRS width could not be measured"
+    else:
+        values_extra["FASCICULAR_BLOCK"] = f"axis {axis}°, QRS {qrs} ms"
+        if qrs < WIDE_QRS_MS and axis < -45:
+            find("LAFB_POSSIBLE", "Possible left anterior fascicular block", "warning", f"axis {axis}° (< −45°) with QRS {qrs} ms; {UNVALIDATED}", axis_mark())
+        elif qrs < WIDE_QRS_MS and 90 < axis <= 180:
+            find("LPFB_POSSIBLE", "Possible left posterior fascicular block", "warning",
+                 f"axis {axis}° (> +90°) with QRS {qrs} ms (also seen with right ventricular overload); {UNVALIDATED}", axis_mark())
+
+    # Brugada-type pattern and early repolarization.
+    st_v = {n: st[n] for n in ("V1", "V2") if st.get(n) is not None}
+    if not st_v:
+        extra_reason["BRUGADA_PATTERN"] = "ST segment in V1/V2 could not be measured"
+    else:
+        values_extra["BRUGADA_PATTERN"] = ", ".join(f"{n} {v:+.2f} mV" for n, v in st_v.items())
+        hit = [n for n, v in st_v.items() if v >= BRUGADA_ST_MV and (t_amp.get(n, 0) < 0 or notched(n))]
+        if hit:
+            find("BRUGADA_PATTERN", "Possible Brugada-type pattern", "warning",
+                 f"ST elevation ≥ {BRUGADA_ST_MV} mV in {', '.join(hit)} with negative T or notched QRS; {UNVALIDATED}",
+                 _beat_mark(infos, fs, hit[0], "st", f"ST segment in {hit[0]}", window=int(0.2 * fs)))
+    er_leads = _contiguous({n for n in elev if n in ("I", "II", "III", "aVF", "V4", "V5", "V6")})
+    if len(st) < 2 or len(t_amp) < 4:
+        extra_reason["EARLY_REPOLARIZATION"] = "ST or T wave could not be measured in enough leads"
+    else:
+        values_extra["EARLY_REPOLARIZATION"] = ("ST elevation in " + ", ".join(er_leads)) if er_leads else "no ST elevation"
+        if er_leads and all(t_amp.get(n, 0) > 0.2 for n in er_leads) and (qrs or 0) < WIDE_QRS_MS:
+            lead = _best_lead(er_leads, lambda n: st.get(n))
+            find("EARLY_REPOLARIZATION", "Possible early repolarization (ST elevation with upright T; infarction not excluded)", "info",
+                 "leads " + ", ".join(er_leads) + f"; {UNVALIDATED}",
+                 _beat_mark(infos, fs, lead, "st", f"ST segment in {lead}", window=int(0.2 * fs)), alert="review")
+
+    # Paced rhythm: a sharp spike just before the QRS in most beats of several leads.
+    spiky = [n for n, i in infos.items() if i["beats"] and sum(b["spike"] for b in i["beats"]) >= 0.6 * len(i["beats"])]
+    if sum(1 for i in infos.values() if i["beats"]) < 3:
+        extra_reason["PACEMAKER"] = "too few leads with measurable beats"
+    else:
+        values_extra["PACEMAKER"] = f"spike in {len(spiky)} lead(s)"
+        if len(spiky) >= 3:
+            find("PACED_RHYTHM_POSSIBLE", "Possible paced rhythm (pacemaker spikes)", "warning",
+                 f"sharp spike before the QRS in {', '.join(spiky)}; {UNVALIDATED}")
+
+    # Regular fast narrow-complex rhythm.
+    if rate_ok and hr is not None and hr >= 140 and rhythm == "Regular rhythm" and (qrs is None or qrs < WIDE_QRS_MS):
+        find("REGULAR_NARROW_TACHY", "Regular fast rhythm with narrow QRS (possible SVT or atrial flutter)", "warning",
+             f"{hr} bpm, regular, QRS {qrs} ms; {UNVALIDATED}", typical())
+
+    unchecked.update(extra_reason)
+
     per_lead = []
     for name in LEADS:
         if name not in infos:
@@ -576,7 +850,12 @@ def diagnose(sex, fs, leads):
         "QRS_DURATION": "QRS duration", "BUNDLE_BRANCH_BLOCK": "Bundle branch block", "AXIS": "Electrical axis",
         "LVH_SOKOLOW_LYON": "Left ventricular hypertrophy (Sokolow-Lyon)",
         "LVH_CORNELL": "Left ventricular hypertrophy (Cornell)", "RVH": "Right ventricular hypertrophy",
-        "ST_ELEVATION": "ST elevation", "ST_DEPRESSION": "ST depression", "PATHOLOGICAL_Q": "Pathological Q waves"}
+        "ST_ELEVATION": "ST elevation", "ST_DEPRESSION": "ST depression", "PATHOLOGICAL_Q": "Pathological Q waves",
+        "P_WAVE": "P wave / atrial fibrillation", "PR_AV_BLOCK": "PR interval / AV block", "ATRIAL_ENLARGEMENT": "Atrial enlargement",
+        "PRE_EXCITATION": "Pre-excitation (WPW)", "QT_QTC": "QT / QTc", "T_WAVE": "T-wave changes",
+        "ECTOPIC_BEATS": "Ectopic beats (PAC / PVC)", "LOW_VOLTAGE": "Low QRS voltage", "R_PROGRESSION": "R-wave progression",
+        "FASCICULAR_BLOCK": "Fascicular blocks", "BRUGADA_PATTERN": "Brugada-type pattern",
+        "EARLY_REPOLARIZATION": "Early repolarization", "PACEMAKER": "Paced rhythm (pacemaker)"}
     linked = {
         "HEART_RATE": ("BRADYCARDIA", "TACHYCARDIA", "HEART_RATE_NEAR_LOW", "HEART_RATE_NEAR_HIGH"),
         "RHYTHM_REGULARITY": ("IRREGULAR_RHYTHM", "RR_VARIATION_BORDERLINE"), "PAUSE": ("PAUSE",),
@@ -585,11 +864,18 @@ def diagnose(sex, fs, leads):
         "AXIS": ("NORMAL_AXIS", "LEFT_AXIS_DEVIATION", "RIGHT_AXIS_DEVIATION", "EXTREME_AXIS"),
         "LVH_SOKOLOW_LYON": ("LVH_VOLTAGE", "LVH_VOLTAGE_BORDERLINE"), "LVH_CORNELL": ("LVH_VOLTAGE", "LVH_VOLTAGE_BORDERLINE"),
         "RVH": ("RVH_PATTERN",), "ST_ELEVATION": ("ST_ELEVATION",), "ST_DEPRESSION": ("ST_DEPRESSION",),
-        "PATHOLOGICAL_Q": ("PATHOLOGICAL_Q",)}
+        "PATHOLOGICAL_Q": ("PATHOLOGICAL_Q",),
+        "P_WAVE": ("P_WAVE_ABSENT", "AFIB_POSSIBLE", "REGULAR_NARROW_TACHY"),
+        "PR_AV_BLOCK": ("FIRST_DEGREE_AV_BLOCK", "SHORT_PR", "PR_BORDERLINE", "AV_BLOCK_HIGH_GRADE", "AV_BLOCK_EXTRA_P"),
+        "ATRIAL_ENLARGEMENT": ("LEFT_ATRIAL_ENLARGEMENT", "RIGHT_ATRIAL_ENLARGEMENT"), "PRE_EXCITATION": ("PRE_EXCITATION_PATTERN",),
+        "QT_QTC": ("LONG_QT", "SHORT_QT", "QT_BORDERLINE"), "T_WAVE": ("T_INVERSION", "TALL_T_WAVES"),
+        "ECTOPIC_BEATS": ("PVC_POSSIBLE", "PAC_POSSIBLE"), "LOW_VOLTAGE": ("LOW_VOLTAGE",), "R_PROGRESSION": ("POOR_R_PROGRESSION",),
+        "FASCICULAR_BLOCK": ("LAFB_POSSIBLE", "LPFB_POSSIBLE"), "BRUGADA_PATTERN": ("BRUGADA_PATTERN",),
+        "EARLY_REPOLARIZATION": ("EARLY_REPOLARIZATION",), "PACEMAKER": ("PACED_RHYTHM_POSSIBLE",)}
     values = {"HEART_RATE": hr and f"{hr} bpm", "RHYTHM_REGULARITY": rate_ok and rhythm, "PAUSE": rate_ok and f"longest RR {max(rr):.1f} s",
               "QRS_DURATION": qrs and f"{qrs} ms", "AXIS": axis is not None and f"{axis}°",
               "LVH_SOKOLOW_LYON": sok is not None and f"{sok} mV", "LVH_CORNELL": cor is not None and f"{cor} mV",
-              "RVH": rv is not None and f"{rv} mV"}
+              "RVH": rv is not None and f"{rv} mV", **values_extra}
 
     def check_entry(c, n):
         if c in unchecked:
@@ -604,9 +890,6 @@ def diagnose(sex, fs, leads):
                 **({"value": values[c]} if values.get(c) else {})}
 
     checks = [check_entry(c, n) for c, n in check_names.items()]
-    checks += [{"code": c, "name": n, "status": "not_implemented", "alert_level": "ok", "finding_codes": [],
-                "reason": "cannot be measured reliably from a photographed trace"}
-               for c, n in (("PR_AV_BLOCK", "PR interval / AV block"), ("QT_QTC", "QT / QTc"), ("P_WAVE", "P wave"))]
 
     abnormal = [f for f in findings if f["severity"] != "info"]
     partial = qrs_conf == "low" or len(per_lead) < 12 or any(c in unchecked for c in check_names)
@@ -630,10 +913,10 @@ def diagnose(sex, fs, leads):
     measurements = {
         "heart_rate_bpm": {"value": hr, "unit": "bpm", "confidence": rhythm_conf, "lead": longest["name"]},
         "rr_ms": {"value": round(_median(rr) * 1000) if rate_ok else None, "unit": "ms", "confidence": rhythm_conf},
-        "pr_ms": {"value": None, "unit": "ms", "confidence": "low"},
+        "pr_ms": {"value": pr, "unit": "ms", "confidence": "low"},
         "qrs_ms": {"value": qrs, "unit": "ms", "confidence": qrs_conf},
-        "qt_ms": {"value": None, "unit": "ms", "confidence": "low"},
-        "qtc_ms": {"value": None, "unit": "ms", "confidence": "low", "formula": "Bazett"},
+        "qt_ms": {"value": qt, "unit": "ms", "confidence": "low"},
+        "qtc_ms": {"value": qtc, "unit": "ms", "confidence": "low", "formula": "Bazett"},
         "qrs_axis_deg": {"value": axis, "unit": "deg", "confidence": "medium" if axis is not None else "low"},
     }
     return summary, {"measurements": measurements, "findings": findings, "criteria": criteria, "per_lead": per_lead,
