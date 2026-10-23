@@ -160,3 +160,19 @@ class CatalogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRhythmDoubleDetection(unittest.TestCase):
+    def test_wide_t_wave_next_to_qrs_is_not_a_second_beat(self):
+        import math
+        import diagnoser
+        fs, n = 200, 2000
+        x = [0.0] * n
+        for k in range(15):
+            i = int((0.3 + k * 0.63) * fs)
+            x[i], x[i + 1] = -0.3, 0.26
+            for j in range(int(0.2 * fs)):
+                x[i + int(0.12 * fs) + j] -= 0.35 * math.sin(math.pi * j / (0.2 * fs))
+        peaks = diagnoser.detect_beats(x, fs)
+        rr = [b - a for a, b in zip(peaks, peaks[1:])]
+        self.assertLess(max(rr) - min(rr), 0.1 * fs)
