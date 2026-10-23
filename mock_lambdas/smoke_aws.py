@@ -1,7 +1,7 @@
-"""Smoke test das lambdas mock DEPLOYADAS: todos os cenários e validações.
+"""Smoke test of the DEPLOYED mock lambdas: all scenarios and validations.
 
-Sobe uma foto de teste em mock-smoke/ no bucket de imagens, invoca as duas
-lambdas em cada cenário e confere status/código contra CONTRATO_LAMBDAS.md.
+Uploads a test photo to mock-smoke/ in the images bucket, invokes both
+lambdas in each scenario and checks status/code against LAMBDA_CONTRACT.md.
 
     python mock_lambdas/smoke_aws.py [--image foto.jpg] [--profile trustedlake]
 """
@@ -21,7 +21,7 @@ READING, INTERPRETATION = "ecg-reading", "ecg-interpretation"
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--image", help="foto de ECG (JPG/PNG); sem ela usa uma imagem sintética")
+    parser.add_argument("--image", help="ECG photo (JPG/PNG); without it a synthetic image is used")
     parser.add_argument("--profile", default="trustedlake")
     parser.add_argument("--region", default="sa-east-1")
     args = parser.parse_args()
@@ -43,7 +43,7 @@ def main():
     def invoke(function, payload):
         response = lam.invoke(FunctionName=function, Payload=json.dumps(payload).encode())
         if response.get("FunctionError"):
-            raise SystemExit(f"FunctionError em {function}: {response['Payload'].read()}")
+            raise SystemExit(f"FunctionError in {function}: {response['Payload'].read()}")
         return json.loads(response["Payload"].read())
 
     def read(**extra):
@@ -58,23 +58,23 @@ def main():
         return invoke(INTERPRETATION, payload)
 
     cases = [
-        ("leitura success", lambda: ok, "OK", None),
-        ("leitura success_with_warnings", lambda: read(mock={"scenario": "success_with_warnings"}), "OK_WITH_WARNINGS", None),
-        ("leitura failure", lambda: read(mock={"scenario": "failure"}), "ERROR", "READ_TRACE_EXTRACTION_FAILED"),
-        ("leitura failure (grid)", lambda: read(mock={"scenario": "failure", "code": "READ_GRID_NOT_FOUND"}), "ERROR", "READ_GRID_NOT_FOUND"),
-        ("leitura refused", lambda: read(mock={"scenario": "refused"}), "REFUSED", "READ_REFUSED_BLURRY"),
-        ("leitura refused (cortada)", lambda: read(mock={"scenario": "refused", "code": "READ_REFUSED_CROPPED"}), "REFUSED", "READ_REFUSED_CROPPED"),
-        ("leitura layout inválido", lambda: read(layout="5x5"), "ERROR", "LAYOUT_UNSUPPORTED"),
-        ("leitura sem imagem", lambda: read(image=None), "ERROR", "IMAGE_MISSING"),
-        ("leitura imagem inexistente", lambda: read(image={"bucket": IMAGES_BUCKET, "key": "mock-smoke/nao-existe.jpg"}), "ERROR", "IMAGE_NOT_FOUND"),
-        ("leitura calibração inválida", lambda: read(calibration={"speed_mm_s": 30}), "ERROR", "CALIBRATION_INVALID"),
-        ("interpretação success", lambda: interpret(), "OK", None),
-        ("interpretação success_with_warnings", lambda: interpret(mock={"scenario": "success_with_warnings"}), "OK_WITH_WARNINGS", None),
-        ("interpretação failure", lambda: interpret(mock={"scenario": "failure"}), "ERROR", "INTERP_NO_QRS_DETECTED"),
-        ("interpretação failure (ruído)", lambda: interpret(mock={"scenario": "failure", "code": "INTERP_SIGNAL_TOO_NOISY"}), "ERROR", "INTERP_SIGNAL_TOO_NOISY"),
-        ("interpretação sem sexo", lambda: interpret(patient={}), "ERROR", "SEX_MISSING"),
-        ("interpretação sexo inválido", lambda: interpret(patient={"sex": "X"}), "ERROR", "SEX_INVALID"),
-        ("interpretação sem sinal", lambda: interpret(signal=None), "ERROR", "SIGNAL_MISSING"),
+        ("reading success", lambda: ok, "OK", None),
+        ("reading success_with_warnings", lambda: read(mock={"scenario": "success_with_warnings"}), "OK_WITH_WARNINGS", None),
+        ("reading failure", lambda: read(mock={"scenario": "failure"}), "ERROR", "READ_TRACE_EXTRACTION_FAILED"),
+        ("reading failure (grid)", lambda: read(mock={"scenario": "failure", "code": "READ_GRID_NOT_FOUND"}), "ERROR", "READ_GRID_NOT_FOUND"),
+        ("reading refused", lambda: read(mock={"scenario": "refused"}), "REFUSED", "READ_REFUSED_BLURRY"),
+        ("reading refused (cropped)", lambda: read(mock={"scenario": "refused", "code": "READ_REFUSED_CROPPED"}), "REFUSED", "READ_REFUSED_CROPPED"),
+        ("reading invalid layout", lambda: read(layout="5x5"), "ERROR", "LAYOUT_UNSUPPORTED"),
+        ("reading without image", lambda: read(image=None), "ERROR", "IMAGE_MISSING"),
+        ("reading missing image", lambda: read(image={"bucket": IMAGES_BUCKET, "key": "mock-smoke/does-not-exist.jpg"}), "ERROR", "IMAGE_NOT_FOUND"),
+        ("reading invalid calibration", lambda: read(calibration={"speed_mm_s": 30}), "ERROR", "CALIBRATION_INVALID"),
+        ("interpretation success", lambda: interpret(), "OK", None),
+        ("interpretation success_with_warnings", lambda: interpret(mock={"scenario": "success_with_warnings"}), "OK_WITH_WARNINGS", None),
+        ("interpretation failure", lambda: interpret(mock={"scenario": "failure"}), "ERROR", "INTERP_NO_QRS_DETECTED"),
+        ("interpretation failure (noise)", lambda: interpret(mock={"scenario": "failure", "code": "INTERP_SIGNAL_TOO_NOISY"}), "ERROR", "INTERP_SIGNAL_TOO_NOISY"),
+        ("interpretation without sex", lambda: interpret(patient={}), "ERROR", "SEX_MISSING"),
+        ("interpretation invalid sex", lambda: interpret(patient={"sex": "X"}), "ERROR", "SEX_INVALID"),
+        ("interpretation without signal", lambda: interpret(signal=None), "ERROR", "SIGNAL_MISSING"),
     ]
     failures = 0
     for name, call, status, code in cases:
@@ -91,8 +91,8 @@ def main():
     print(f"\noverlay (1h): {url}")
     try:
         s3.delete_object(Bucket=IMAGES_BUCKET, Key=key)
-    except Exception as exc:  # limpeza é best-effort
-        print(f"aviso: não removi {key}: {exc}")
+    except Exception as exc:  # cleanup is best-effort
+        print(f"warning: could not remove {key}: {exc}")
     sys.exit(1 if failures else 0)
 
 

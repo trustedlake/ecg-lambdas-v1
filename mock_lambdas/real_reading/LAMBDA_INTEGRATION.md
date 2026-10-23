@@ -1,11 +1,11 @@
-# AWS Lambda ECG Analyser — contrato
+# AWS Lambda ECG Analyser — contract
 
-| Operação | `status` | `artifacts` | Prefixo S3 |
+| Operation | `status` | `artifacts` | S3 prefix |
 |---|---|---|---|
 | `analyze` | `CONSISTENCY_PASS` / `REVIEW_REQUIRED` | `result`, `signals`, `trace_masks`, `working_image`, `visao_geral` | `ecg-analyser/{attempt_id}/initial/` |
-| `analyze` (bloqueado) | `REJECTED_LOW_TRACE_GRID_CONTRAST` | `result`, `rejection_preview` | `ecg-analyser/{attempt_id}/initial/` |
-| `refine` | `MANUAL_REVIEW_REQUIRED` | `result`, `signals`, `trace_masks`, `working_image`, `correction_preview` (+ `visao_geral` anterior) | `ecg-analyser/{attempt_id}/{uuid}/` |
+| `analyze` (blocked) | `REJECTED_LOW_TRACE_GRID_CONTRAST` | `result`, `rejection_preview` | `ecg-analyser/{attempt_id}/initial/` |
+| `refine` | `MANUAL_REVIEW_REQUIRED` | `result`, `signals`, `trace_masks`, `working_image`, `correction_preview` (+ previous `visao_geral`) | `ecg-analyser/{attempt_id}/{uuid}/` |
 
-Retorno também fornece `warnings`, `grid`, `leads`, `manual_correction`. `refine` recebe máscara/traços em coordenadas `normalized_image_v1`: escala [0,1] sobre **working_image.png** já retificada; o handler arredonda para `round(x*(width-1))`. Rejeições não aceitam pintura, e colunas corrigidas continuam marcadas como ambíguas/invalidas para análise clínica.
+The return also provides `warnings`, `grid`, `leads`, `manual_correction`. `refine` receives mask/strokes in `normalized_image_v1` coordinates: scale [0,1] over the already-rectified **working_image.png**; the handler rounds to `round(x*(width-1))`. Rejections do not accept painting, and corrected columns remain marked as ambiguous/invalid for clinical analysis.
 
-Runtime esperado: AWS Lambda container Python + NumPy + OpenCV-headless + Pillow + boto3. Dimensionamento sugerido **3 GB RAM, 240s timeout, /tmp 2 GB**, sujeito a teste real; não foi feito deploy. A imagem Docker foi construída localmente (1.25 GB) e o handler importa corretamente.  Uma Lambda síncrona leva até 240s mais cold start/rede, e Django/Gunicorn/proxy precisam de timeout compatível.
+Expected runtime: AWS Lambda container Python + NumPy + OpenCV-headless + Pillow + boto3. Suggested sizing **3 GB RAM, 240 s timeout, /tmp 2 GB**, subject to real testing; no deploy was done. The Docker image was built locally (1.25 GB) and the handler imports correctly. A synchronous Lambda takes up to 240 s plus cold start/network, and Django/Gunicorn/proxy need a compatible timeout.

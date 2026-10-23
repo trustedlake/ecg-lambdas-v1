@@ -1,6 +1,6 @@
-# Lambdas MOCK de leitura e interpretação de ECG (contrato v1, CONTRATO_LAMBDAS.md).
-# Stack independente: state próprio, só referencia os buckets já existentes do
-# ecg-lambdas (sem alterá-los). Rode ../build.sh antes do plan/apply.
+# MOCK lambdas for ECG reading and interpretation (contract v1, LAMBDA_CONTRACT.md).
+# Independent stack: own state, only references the existing ecg-lambdas
+# buckets (without changing them). Run ../build.sh before plan/apply.
 
 terraform {
   required_providers {
@@ -88,7 +88,7 @@ resource "aws_cloudwatch_log_group" "this" {
 resource "aws_lambda_function" "this" {
   for_each         = local.functions
   function_name    = each.value.name
-  description      = "${each.key} de ECG — contrato v1 (ecg-lambdas-v1/CONTRATO_LAMBDAS.md)"
+  description      = "${each.key} ECG lambda — contract v1 (ecg-lambdas-v1/LAMBDA_CONTRACT.md)"
   role             = aws_iam_role.this[each.key].arn
   handler          = "handler.handler"
   runtime          = "python3.12"
@@ -106,8 +106,8 @@ resource "aws_lambda_function" "this" {
 }
 
 # ---------------------------------------------------------------------------
-# Leitura REAL (ecg-analyser, contrato 2.0): Lambda em imagem de container.
-# Imagem no repo ECR já existente "ecg-analyser", tag var.reading_image_tag.
+# REAL reading (ecg-analyser, contract 2.0): Lambda as a container image.
+# Image in the existing ECR repo "ecg-analyser", tag var.reading_image_tag.
 # ---------------------------------------------------------------------------
 data "aws_ecr_repository" "analyser" {
   name = "ecg-analyser"
@@ -149,13 +149,13 @@ resource "aws_cloudwatch_log_group" "reading_real" {
 
 resource "aws_lambda_function" "reading_real" {
   function_name = "ecg-reading"
-  description   = "Leitura REAL de ECG (ecg-analyser, 6 metodos, contrato 2.0)"
+  description   = "REAL ECG reading (ecg-analyser, 6 methods, contract 2.0)"
   role          = aws_iam_role.reading_real.arn
   package_type  = "Image"
   image_uri     = "${data.aws_ecr_repository.analyser.repository_url}:${var.reading_image_tag}"
   architectures = ["x86_64"]
   timeout       = 900
-  memory_size   = 3538 # 2 vCPU: os 6 metodos rodam em subprocessos
+  memory_size   = 3538 # 2 vCPU: the 6 methods run in subprocesses
   environment {
     variables = { RESULTS_BUCKET = data.aws_s3_bucket.results.id, CODE_VERSION = var.code_version }
   }

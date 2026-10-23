@@ -1,25 +1,25 @@
-# Adaptador de leitura ECG para `ecg-lambdas-v1` — contrato 2.0
+# ECG reading adapter for `ecg-lambdas-v1` — contract 2.0
 
-Entrada: `lambda_v1.handler(event, context)`, referenciado pelo shim do v1 em `mock_lambdas/reading/handler.py`.
+Entry point: `lambda_v1.handler(event, context)`, referenced by the v1 shim in `mock_lambdas/reading/handler.py`.
 
-Este adaptador fica **neste repositório** (ecg-analyser), preservando o v1 como proprietário do envelope/erros de contrato. Não há chamada a recursos congelados de avaliação (`outputs/lote50_01/...`); seis módulos vêm diretamente do `research_methods.registry`. `baseline_peaks` e as utilidades para `prepare`, `grid`, `convert` e `color_gate` usam `frozen_peaks34`, cujo manifesto foi verificado pelos testes. O classificador vem de `selector/score.py` sem retreino.
+This adapter lives **in this repository** (ecg-analyser), keeping v1 as the owner of the envelope/contract errors. There are no calls to frozen evaluation resources (`outputs/lote50_01/...`); six modules come directly from `research_methods.registry`. `baseline_peaks` and the utilities for `prepare`, `grid`, `convert` and `color_gate` use `frozen_peaks34`, whose manifest was verified by the tests. The classifier comes from `selector/score.py` without retraining.
 
-## Fluxo
+## Flow
 
-1. Validação completa de `request_id`, versão 2.0, layout, velocidade/ganho explícitos e bucket/key; `1. Testes` é proibido.
-2. Presença **e SHA-256 do modelo aprovado** (`model_selector.pkl`, prefixo `cb0f395367ec`) verificados antes de baixar e processar a imagem; na ausência/mismatch: `READ_SELECTOR_UNAVAILABLE`.
-3. S3 `head_object/get_object` com limite de tamanho, formato e pixels. Decodificação com EXIF preservado por `prepare`; imagem original não é modificada.
-4. `prepare`, `estimate_grid` e seis `extract(Context(...))` sequenciais (sem paralelismo, sem dependências de outputs congelados).
-5. Integridade dos candidatos `Extraction.validate`; gate cromático **inalterado**, bloqueia exportação de sinais. Grade não válida implica abstinência para evitar amplitudes fictícias.
-6. Para cada candidato permitido: `convert` original em unidades físicas; sinal nativo, sem reamostrar a saída; score com **`load_leads`, `score_leads`, `record_score`** do modelo aprovado, sem fallback heurístico.
-7. `result.json`, `preview.png` (ou `rejection_preview.png`) e `leads.json` sob `reading/<request_id>/<run_id>/<method>/`, salvos no `RESULTS_BUCKET`. Status e referências retornam em `methods[]`.
-8. Envelope final 2.0, com `REFUSED` se todos estiverem bloqueados/abstidos, `ERROR` se nenhum produzir sinal e houver erro.
+1. Full validation of `request_id`, version 2.0, layout, explicit speed/gain and bucket/key; `1. Testes` is forbidden.
+2. Presence **and SHA-256 of the approved model** (`model_selector.pkl`, prefix `cb0f395367ec`) verified before downloading and processing the image; if missing/mismatched: `READ_SELECTOR_UNAVAILABLE`.
+3. S3 `head_object/get_object` with limits on size, format and pixels. Decoding with EXIF preserved by `prepare`; the original image is not modified.
+4. `prepare`, `estimate_grid` and six sequential `extract(Context(...))` calls (no parallelism, no dependencies on frozen outputs).
+5. Candidate integrity via `Extraction.validate`; chromatic gate **unchanged**, blocks signal export. An invalid grid implies abstention to avoid fictitious amplitudes.
+6. For each allowed candidate: `convert` the original into physical units; native signal, without resampling the output; score with **`load_leads`, `score_leads`, `record_score`** of the approved model, with no heuristic fallback.
+7. `result.json`, `preview.png` (or `rejection_preview.png`) and `leads.json` under `reading/<request_id>/<run_id>/<method>/`, saved in `RESULTS_BUCKET`. Status and references are returned in `methods[]`.
+8. Final 2.0 envelope, with `REFUSED` if all are blocked/abstained, `ERROR` if none produced a signal and there was an error.
 
 ## Layouts
 
-`3x4+1` e `12x1` têm perfis estáticos e genéricos já disponíveis (`configs/report_normal.json` / `configs/data_12x1.json`), sempre com a calibração sobrescrita **somente** a partir da entrada explícita. Outros layouts do v1 não possuem configuração genérica correspondente nos materiais entregues e retornam `LAYOUT_UNSUPPORTED`. Não foi feito encaixe por nome de arquivo ou por imagem.
+`3x4+1` and `12x1` have static, generic profiles already available (`configs/report_normal.json` / `configs/data_12x1.json`), always with the calibration overridden **only** from the explicit input. Other v1 layouts have no matching generic configuration in the delivered materials and return `LAYOUT_UNSUPPORTED`. No fitting by file name or by image was done.
 
-## Para testar localmente com os dois repositórios lado a lado
+## Testing locally with the two repositories side by side
 
 ```bash
 cd ecg-lambdas-v1
@@ -29,19 +29,19 @@ PYTHONPATH=extractor python -m unittest discover -s extractor/tests -p 'test_res
 PYTHONPATH=extractor python -m unittest discover -s extractor/tests -p 'test_selector.py' -v
 ```
 
-Na primeira bateria os testes de integração descobrem `../ecg-analyser/extractor`. Se estiver em outro local, defina `ECG_ANALYSER_EXTRACTOR_PATH`. Os testes com `FakeS3` não executam AWS. O teste de exportação utiliza mock **apenas do escore** porque o arquivo `model_selector.pkl` não veio no ZIP. O contrato recusa operação real sem esse arquivo aprovado.
+In the first battery the integration tests discover `../ecg-analyser/extractor`. If it is elsewhere, set `ECG_ANALYSER_EXTRACTOR_PATH`. The `FakeS3` tests do not run AWS. The export test mocks **only the score** because the `model_selector.pkl` file did not come in the ZIP. The contract refuses real operation without that approved file.
 
-## Deploy: não autorizado, não realizado
+## Deploy: not authorized, not performed
 
-Não foi publicado container ou alterado Terraform, IAM, timeout, memória ou bucket. O `mock_lambdas/build.sh` do v1 permanece construindo o pacote da **leitura mock legada**, a partir de `reading/mock_handler.py`, para evitar substituição involuntária de um deploy existente. **Não** use esse build para publicar o adaptador real.
+No container was published and no Terraform, IAM, timeout, memory or bucket was changed. The v1 `mock_lambdas/build.sh` still builds the **legacy mock reading** package, from `reading/mock_handler.py`, to avoid unintentionally replacing an existing deploy. Do **not** use that build to publish the real adapter.
 
-Quando houver decisão de custo/infra, empacotar conjuntamente `ecg_contract`, o módulo `lambda_v1`, módulos `ecg`, `research_methods`, `review`, `configs`, pasta `selector` + `model_selector.pkl` verificado e dependências compatíveis, e apontar o handler para `reading.handler.handler`. O v1 atualmente declara 1769 MB/60 s; ECR, runtime, timeout e memória são decisões pendentes. `extractor/requirements.txt` no ZIP ainda fixa `opencv-python-headless==4.13.0.92`; compatibilidade com OpenCV 5 não foi validada aqui, nem o ambiente AWS.
+Once there is a cost/infra decision, package together `ecg_contract`, the `lambda_v1` module, the `ecg`, `research_methods`, `review` modules, `configs`, the `selector` folder + verified `model_selector.pkl` and compatible dependencies, and point the handler to `reading.handler.handler`. v1 currently declares 1769 MB/60 s; ECR, runtime, timeout and memory are pending decisions. `extractor/requirements.txt` in the ZIP still pins `opencv-python-headless==4.13.0.92`; compatibility with OpenCV 5 was not validated here, nor was the AWS environment.
 
-## Dependências externas para completar
+## External dependencies to complete
 
-- **Modelo aprovado original** (`selector/model_selector.pkl`, SHA `cb0f395367ec...`) — não incluído e não reconstituído.
-- Imagens de `ECG Images/0. Treino` para testar os seis métodos, medir tempos/memória e conferir gate nas amostras 07/38. **Não acessar `1. Testes`.**
-- Backend Django: selecionar o método com maior `selector_score` entre `status == "OK"`, baixar `files.leads` e repassar esse JSON na propriedade `signal` da Lambda `interpret` — não implementado neste par de repositórios.
-- Deliberar aceitação dos seis métodos ainda categorizados pesquisa e o custo de empacotamento/infra.
+- **Original approved model** (`selector/model_selector.pkl`, SHA `cb0f395367ec...`) — not included and not reconstructed.
+- Images from `ECG Images/0. Treino` to test the six methods, measure times/memory and check the gate on samples 07/38. **Do not access `1. Testes`.**
+- Django backend: select the method with the highest `selector_score` among `status == "OK"`, download `files.leads` and pass that JSON in the `signal` property of the `interpret` Lambda — not implemented in this pair of repositories.
+- Decide on accepting the six methods still categorized as research, and the packaging/infra cost.
 
-**Uso clínico:** trata-se de extração experimental de sinais, com riscos de inexatidão. Nenhum `OK` atesta validade médica ou substitui avaliação clínica.
+**Clinical use:** this is experimental signal extraction, with risk of inaccuracy. No `OK` attests medical validity or replaces clinical assessment.

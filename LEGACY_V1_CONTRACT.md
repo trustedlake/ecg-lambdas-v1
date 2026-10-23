@@ -1,62 +1,62 @@
-# Contrato das lambdas de leitura e interpretação de ECG — v1.0
+# Contract of the ECG reading and interpretation lambdas — v1.0
 
-Fonte da verdade do contrato entre o backend Django e as duas lambdas:
+Source of truth for the contract between the Django backend and the two lambdas:
 
-| Lambda | Mock (este repo, `mock_lambdas/`) | Real (Chris, OpenCV 5) |
+| Lambda | Mock (this repo, `mock_lambdas/`) | Real (Chris, OpenCV 5) |
 |---|---|---|
-| **Leitura** (`operation: "read"`) | `ecg-reading` | substitui o mock mantendo este contrato |
-| **Interpretação** (`operation: "interpret"`) | `ecg-interpretation` | substitui o mock mantendo este contrato |
+| **Reading** (`operation: "read"`) | `ecg-reading` | replaces the mock while keeping this contract |
+| **Interpretation** (`operation: "interpret"`) | `ecg-interpretation` | replaces the mock while keeping this contract |
 
-O backend escolhe a função pelo nome (env `AWS_LAMBDA_ECG_READING` / `AWS_LAMBDA_ECG_INTERPRETATION`);
-trocar o mock pela real é só trocar o nome. O catálogo de códigos está em código em
-[`mock_lambdas/ecg_contract/__init__.py`](mock_lambdas/ecg_contract/__init__.py), e a lambda real pode
-reaproveitar esse módulo. Um teste falha se algum código do catálogo faltar neste documento.
+The backend picks the function by name (env `AWS_LAMBDA_ECG_READING` / `AWS_LAMBDA_ECG_INTERPRETATION`);
+swapping the mock for the real one is just a name change. The code catalog lives in code at
+[`mock_lambdas/ecg_contract/__init__.py`](mock_lambdas/ecg_contract/__init__.py), and the real lambda can
+reuse that module. A test fails if any catalog code is missing from this document.
 
-## 1. Regras gerais
+## 1. General rules
 
-- Invocação **síncrona** (`InvocationType=RequestResponse`), payload e resposta em JSON. O limite da AWS é 6 MB
-  em cada sentido, por isso a imagem vai por referência ao S3 e o sinal vai inline (12 derivações a 500 Hz ≈ 150–450 KB).
-- **Erros esperados nunca viram `FunctionError`.** A lambda sempre devolve o envelope abaixo. `FunctionError`
-  (exceção não tratada, timeout, OOM) significa falha de infraestrutura e o backend trata como `INTERNAL_ERROR`.
-- `request_id` é obrigatório e precisa ser um UUID: use o id da tentativa (`ExamAttempt.id`). Ele vai para os
-  logs e para o prefixo dos artefatos no S3.
-- `contract_version` é opcional e vale `"1.0"` por padrão. Outro valor devolve `UNSUPPORTED_CONTRACT_VERSION`.
-- Campos desconhecidos são ignorados. Isso permite repassar a saída da leitura direto na interpretação.
-- A validação de entrada roda **antes** de qualquer processamento. Uma entrada inválida devolve erro de
-  validação mesmo quando um cenário mock foi pedido.
-- Mensagens em pt-BR, prontas para mostrar ao usuário. Use `code` para decidir o fluxo e `message` para exibir.
+- **Synchronous** invocation (`InvocationType=RequestResponse`), JSON payload and response. The AWS limit is 6 MB
+  in each direction, so the image goes by S3 reference and the signal goes inline (12 leads at 500 Hz ≈ 150–450 KB).
+- **Expected errors never become `FunctionError`.** The lambda always returns the envelope below. `FunctionError`
+  (unhandled exception, timeout, OOM) means an infrastructure failure and the backend treats it as `INTERNAL_ERROR`.
+- `request_id` is required and must be a UUID: use the attempt id (`ExamAttempt.id`). It goes into the
+  logs and into the artifact prefix in S3.
+- `contract_version` is optional and defaults to `"1.0"`. Any other value returns `UNSUPPORTED_CONTRACT_VERSION`.
+- Unknown fields are ignored. This allows passing the reading output straight into the interpretation.
+- Input validation runs **before** any processing. An invalid input returns a validation error
+  even when a mock scenario was requested.
+- Messages in English, ready to show to the user. Use `code` to decide the flow and `message` to display.
 
-### 1.1 Envelope de resposta (as duas lambdas)
+### 1.1 Response envelope (both lambdas)
 
 ```json
 {
   "contract_version": "1.0",
   "operation": "read | interpret",
-  "request_id": "uuid recebido (null se o próprio request_id for inválido)",
+  "request_id": "received uuid (null if request_id itself is invalid)",
   "status": "OK | OK_WITH_WARNINGS | REFUSED | ERROR",
   "warnings": [{"code": "LEAD_PARTIAL_TRACE", "message": "…", "lead": "V2"}],
   "error": null,
-  "result": { "…": "específico da operação; null quando status é REFUSED/ERROR" },
+  "result": { "…": "operation-specific; null when status is REFUSED/ERROR" },
   "meta": {"engine": "ecg-reading", "engine_version": "git sha", "duration_ms": 235,
-           "mock_scenario": "success (só nos mocks)"}
+           "mock_scenario": "success (mocks only)"}
 }
 ```
 
-| `status` | Significado | `result` | `error` | O que o app faz |
+| `status` | Meaning | `result` | `error` | What the app does |
 |---|---|---|---|---|
-| `OK` | Sucesso sem ressalvas | preenchido | `null` | segue o fluxo |
-| `OK_WITH_WARNINGS` | Sucesso com avisos (`warnings` não vazio) | preenchido | `null` | segue, exibindo os avisos |
-| `REFUSED` | **Só leitura.** Empecilho visível na foto | `null` | preenchido (`category: "refused"`) | pede nova foto e mostra o motivo e a prévia |
-| `ERROR` | Entrada inválida ou falha de processamento | `null` | preenchido | mostra a mensagem; `retryable` diz se vale tentar de novo |
+| `OK` | Success with no caveats | filled | `null` | continues the flow |
+| `OK_WITH_WARNINGS` | Success with warnings (`warnings` not empty) | filled | `null` | continues, showing the warnings |
+| `REFUSED` | **Reading only.** Visible obstacle in the photo | `null` | filled (`category: "refused"`) | asks for a new photo and shows the reason and the preview |
+| `ERROR` | Invalid input or processing failure | `null` | filled | shows the message; `retryable` says whether trying again is worthwhile |
 
-Formato de `error`:
+Format of `error`:
 
 ```json
 {"code": "READ_GRID_NOT_FOUND", "category": "validation | refused | processing | internal",
- "retryable": false, "message": "Mensagem legível em pt-BR.", "details": {"…": "contexto opcional"}}
+ "retryable": false, "message": "Readable message in English.", "details": {"…": "optional context"}}
 ```
 
-## 2. Lambda de leitura (`read`)
+## 2. Reading lambda (`read`)
 
 ### 2.1 Request
 
@@ -71,29 +71,29 @@ Formato de `error`:
 }
 ```
 
-| Campo | Obrigatório | Regra | Erro |
+| Field | Required | Rule | Error |
 |---|---|---|---|
-| `image.bucket`, `image.key` | sim | strings não vazias | `IMAGE_MISSING` |
-| objeto no S3 | sim | precisa existir | `IMAGE_NOT_FOUND` |
-| tamanho | — | ≤ 15 MB | `IMAGE_TOO_LARGE` |
-| formato (pelo conteúdo, não pela extensão) | — | JPEG, PNG ou WebP | `IMAGE_FORMAT_UNSUPPORTED` / `IMAGE_UNREADABLE` |
-| resolução (após EXIF) | — | lado maior ≥ 800 px e lado menor ≥ 500 px | `IMAGE_TOO_SMALL` |
-| `layout` | sim | um dos layouts da tabela 2.2 | `LAYOUT_MISSING` / `LAYOUT_UNSUPPORTED` |
-| `calibration` | não (padrão 25 mm/s, 10 mm/mV) | `speed_mm_s` ∈ {12.5, 25, 50}; `gain_mm_mv` ∈ {5, 10, 20} | `CALIBRATION_INVALID` |
-| `mock` | não | só nos mocks; a real ignora (ver seção 4) | `MOCK_SCENARIO_INVALID` |
+| `image.bucket`, `image.key` | yes | non-empty strings | `IMAGE_MISSING` |
+| object in S3 | yes | must exist | `IMAGE_NOT_FOUND` |
+| size | — | ≤ 15 MB | `IMAGE_TOO_LARGE` |
+| format (by content, not by extension) | — | JPEG, PNG or WebP | `IMAGE_FORMAT_UNSUPPORTED` / `IMAGE_UNREADABLE` |
+| resolution (after EXIF) | — | longer side ≥ 800 px and shorter side ≥ 500 px | `IMAGE_TOO_SMALL` |
+| `layout` | yes | one of the layouts in table 2.2 | `LAYOUT_MISSING` / `LAYOUT_UNSUPPORTED` |
+| `calibration` | no (default 25 mm/s, 10 mm/mV) | `speed_mm_s` ∈ {12.5, 25, 50}; `gain_mm_mv` ∈ {5, 10, 20} | `CALIBRATION_INVALID` |
+| `mock` | no | mocks only; the real one ignores it (see section 4) | `MOCK_SCENARIO_INVALID` |
 
-### 2.2 Layouts suportados
+### 2.2 Supported layouts
 
-Cada linha da grade ocupa 10 s de papel, dividida igualmente entre as colunas. As derivações de ritmo ocupam 10 s cada.
+Each grid row spans 10 s of paper, split equally between the columns. Rhythm leads span 10 s each.
 
-| `layout` | Grade (linhas) | Ritmo (10 s) |
+| `layout` | Grid (rows) | Rhythm (10 s) |
 |---|---|---|
-| `3x4` | I aVR V1 V4 · II aVL V2 V5 · III aVF V3 V6 (2,5 s cada) | — |
-| `3x4+1` | idem | II |
-| `3x4+3` | idem | V1, II, V5 |
-| `6x2` | I V1 · II V2 · III V3 · aVR V4 · aVL V5 · aVF V6 (5 s cada) | — |
-| `6x2+1` | idem | II |
-| `12x1` | uma derivação por linha (10 s cada) | — |
+| `3x4` | I aVR V1 V4 · II aVL V2 V5 · III aVF V3 V6 (2.5 s each) | — |
+| `3x4+1` | same | II |
+| `3x4+3` | same | V1, II, V5 |
+| `6x2` | I V1 · II V2 · III V3 · aVR V4 · aVL V5 · aVF V6 (5 s each) | — |
+| `6x2+1` | same | II |
+| `12x1` | one lead per row (10 s each) | — |
 
 ### 2.3 Response `result` (status `OK` / `OK_WITH_WARNINGS`)
 
@@ -108,7 +108,7 @@ Cada linha da grade ocupa 10 s de papel, dividida igualmente entre as colunas. A
   "leads": [
     {"name": "I", "kind": "panel", "row": 0, "col": 0, "start_s": 0.0, "duration_s": 2.5,
      "quality": "good", "coverage": 1.0, "bbox_px": [64.0, 60.0, 432.0, 285.0], "baseline_y_px": 172.5,
-     "samples": [0.0, 0.0012, 0.0031, "… 1250 valores (mV) ou null"]},
+     "samples": [0.0, 0.0012, 0.0031, "… 1250 values (mV) or null"]},
     {"name": "II", "kind": "rhythm", "row": 3, "col": 0, "start_s": 0.0, "duration_s": 10.0, "…": "…"}
   ],
   "artifacts": {
@@ -118,36 +118,36 @@ Cada linha da grade ocupa 10 s de papel, dividida igualmente entre as colunas. A
 }
 ```
 
-- `leads[].samples`: valores em **mV** na taxa `sampling_rate_hz`, com tamanho `duration_s × sampling_rate_hz`.
-  Use **`null`** nos trechos sem leitura (nunca 0 inventado). `start_s` é o instante no papel (0–10 s), e as
-  derivações da mesma coluna são simultâneas.
-- `kind`: `panel` (célula da grade) ou `rhythm` (tira longa). A mesma derivação pode aparecer nos dois.
-- `quality`: `good` | `partial` | `saturated` | `low`. `coverage`: fração de amostras não nulas (0–1).
-- `grid`, `bbox_px` e `baseline_y_px` são coordenadas em pixels **da imagem original após a rotação EXIF**,
-  para o app desenhar ou destacar regiões, se quiser.
-- `artifacts.overlay`: **PNG da imagem original com o gridline detectado e o traço extraído desenhados por cima.**
-  É a imagem que o usuário vê para aceitar ou recusar a leitura. O backend gera a presigned URL; a lambda
-  nunca devolve URL.
-- `artifacts.signal`: o mesmo `result` (sem `artifacts`), persistido para auditoria e reprocessamento.
-- Os artefatos ficam sempre no bucket de resultados (env `RESULTS_BUCKET` da lambda) e sob
-  `reading/<request_id>/<run_id>/`. Cada execução gera um `run_id` novo, então nada é sobrescrito.
+- `leads[].samples`: values in **mV** at the `sampling_rate_hz` rate, with length `duration_s × sampling_rate_hz`.
+  Use **`null`** for stretches with no reading (never an invented 0). `start_s` is the instant on the paper (0–10 s), and
+  leads in the same column are simultaneous.
+- `kind`: `panel` (grid cell) or `rhythm` (long strip). The same lead can appear in both.
+- `quality`: `good` | `partial` | `saturated` | `low`. `coverage`: fraction of non-null samples (0–1).
+- `grid`, `bbox_px` and `baseline_y_px` are coordinates in pixels **of the original image after EXIF rotation**,
+  so the app can draw or highlight regions if it wants to.
+- `artifacts.overlay`: **PNG of the original image with the detected gridline and the extracted trace drawn on top.**
+  It is the image the user sees to accept or reject the reading. The backend generates the presigned URL; the lambda
+  never returns a URL.
+- `artifacts.signal`: the same `result` (without `artifacts`), persisted for audit and reprocessing.
+- Artifacts always go in the results bucket (lambda env `RESULTS_BUCKET`) and under
+  `reading/<request_id>/<run_id>/`. Each execution generates a new `run_id`, so nothing is overwritten.
 
-### 2.4 Recusa (`status: "REFUSED"`)
+### 2.4 Refusal (`status: "REFUSED"`)
 
-A leitura é recusada quando há **empecilho visível** que o usuário resolve tirando outra foto. O `error` traz o motivo e,
-quando possível, uma prévia com a região do problema destacada:
+The reading is refused when there is a **visible obstacle** that the user resolves by taking another photo. The `error` carries the reason and,
+when possible, a preview with the problem region highlighted:
 
 ```json
 {"code": "READ_REFUSED_OCCLUDED", "category": "refused", "retryable": false,
- "message": "Há sobreposição sobre o traçado (dedo, reflexo, objeto ou anotação); remova e fotografe novamente.",
+ "message": "Something overlaps the trace (finger, glare, object or annotation); remove it and retake the photo.",
  "details": {"region_px": [560, 300, 960, 700],
              "preview": {"bucket": "…results…", "key": "reading/<request_id>/<run_id>/refusal_preview.png", "content_type": "image/png"}}}
 ```
 
-Diferença entre `REFUSED` e `ERROR` de processamento: na recusa **a foto** tem problema e a solução é outra
-foto. No `ERROR` com `category: "processing"` **o algoritmo** não conseguiu ler uma foto aparentemente boa.
+Difference between `REFUSED` and a processing `ERROR`: in a refusal **the photo** has a problem and the fix is another
+photo. In an `ERROR` with `category: "processing"` **the algorithm** could not read an apparently good photo.
 
-## 3. Lambda de interpretação (`interpret`)
+## 3. Interpretation lambda (`interpret`)
 
 ### 3.1 Request
 
@@ -162,20 +162,20 @@ foto. No `ERROR` com `category: "processing"` **o algoritmo** não conseguiu ler
 }
 ```
 
-`signal` tem o mesmo formato de `result` da leitura: o backend pode repassar o `result` da leitura inteiro, porque campos extras são ignorados.
+`signal` has the same format as the reading `result`: the backend can pass the whole reading `result` through, because extra fields are ignored.
 
-| Campo | Regra | Erro |
+| Field | Rule | Error |
 |---|---|---|
-| `patient.sex` | obrigatório, `"F"` ou `"M"` (o backend mapeia `Patient.gender`) | `SEX_MISSING` / `SEX_INVALID` |
-| `signal` | objeto obrigatório | `SIGNAL_MISSING` / `SIGNAL_INVALID` |
-| `signal.sampling_rate_hz` | número entre 100 e 2000 | `SIGNAL_SAMPLING_RATE_INVALID` |
-| `signal.units` | opcional; se vier, `"mV"` | `SIGNAL_INVALID` |
-| `signal.leads` | lista não vazia | `SIGNAL_MISSING` |
-| `leads[].name` | uma das 12 derivações padrão (I, II, III, aVR, aVL, aVF, V1–V6) | `SIGNAL_LEAD_UNKNOWN` |
-| `leads[].samples` | lista de números ou `null`, no máximo 60 s | `SIGNAL_INVALID` |
-| amostras válidas | ≥ 1 s (`sampling_rate_hz` amostras não nulas) por derivação | `SIGNAL_TOO_SHORT` |
+| `patient.sex` | required, `"F"` or `"M"` (the backend maps `Patient.gender`) | `SEX_MISSING` / `SEX_INVALID` |
+| `signal` | required object | `SIGNAL_MISSING` / `SIGNAL_INVALID` |
+| `signal.sampling_rate_hz` | number between 100 and 2000 | `SIGNAL_SAMPLING_RATE_INVALID` |
+| `signal.units` | optional; if present, `"mV"` | `SIGNAL_INVALID` |
+| `signal.leads` | non-empty list | `SIGNAL_MISSING` |
+| `leads[].name` | one of the 12 standard leads (I, II, III, aVR, aVL, aVF, V1–V6) | `SIGNAL_LEAD_UNKNOWN` |
+| `leads[].samples` | list of numbers or `null`, at most 60 s | `SIGNAL_INVALID` |
+| valid samples | ≥ 1 s (`sampling_rate_hz` non-null samples) per lead | `SIGNAL_TOO_SHORT` |
 
-Derivações ausentes **não** são erro: geram o aviso `LEAD_MISSING`, e os critérios que dependem delas saem como `not_evaluated`.
+Missing leads are **not** an error: they generate the `LEAD_MISSING` warning, and the criteria that depend on them come out as `not_evaluated`.
 
 ### 3.2 Response `result`
 
@@ -184,11 +184,11 @@ Derivações ausentes **não** são erro: geram o aviso `LEAD_MISSING`, e os cri
   "patient": {"sex": "F"},
   "summary": {
     "classification": "normal | borderline | abnormal",
-    "headline": "ECG dentro dos limites da normalidade",
-    "rhythm": "Ritmo sinusal",
+    "headline": "ECG within normal limits",
+    "rhythm": "Sinus rhythm",
     "heart_rate_bpm": 72,
-    "key_findings": ["Ritmo sinusal", "Eixo elétrico normal"],
-    "text": "Ritmo sinusal, FC 72 bpm, QTc 416 ms. ECG dentro dos limites da normalidade."
+    "key_findings": ["Sinus rhythm", "Normal electrical axis"],
+    "text": "Sinus rhythm, HR 72 bpm, QTc 416 ms. ECG within normal limits."
   },
   "details": {
     "measurements": {
@@ -200,107 +200,107 @@ Derivações ausentes **não** são erro: geram o aviso `LEAD_MISSING`, e os cri
       "qtc_ms": {"value": 416, "unit": "ms", "confidence": "medium", "formula": "Bazett"},
       "qrs_axis_deg": {"value": 45, "unit": "deg", "confidence": "medium"}
     },
-    "findings": [{"code": "SINUS_RHYTHM", "label": "Ritmo sinusal", "severity": "info | warning | critical",
-                  "evidence": "FC 72 bpm, RR regular"}],
-    "criteria": [{"name": "QTc (Bazett)", "value": 416, "unit": "ms", "reference": "≤ 460 ms (feminino)",
+    "findings": [{"code": "SINUS_RHYTHM", "label": "Sinus rhythm", "severity": "info | warning | critical",
+                  "evidence": "HR 72 bpm, regular RR"}],
+    "criteria": [{"name": "QTc (Bazett)", "value": 416, "unit": "ms", "reference": "≤ 460 ms (female)",
                   "sex_specific": true, "status": "normal | abnormal | not_evaluated"}],
     "per_lead": [{"name": "I", "r_amplitude_mv": 0.711, "s_amplitude_mv": 0.321, "quality": "good"}]
   },
-  "disclaimer": "Resultado gerado automaticamente a partir do sinal extraído. Não substitui a avaliação e o laudo de um médico."
+  "disclaimer": "Result generated automatically from the extracted signal. It does not replace a physician's assessment and report."
 }
 ```
 
-- `summary` é o **resumo geral** (tela principal). `details` é o **resultado detalhado**.
-- `confidence`: `high` | `medium` | `low`. `measurements.*.value` pode ser `null` quando não for medível.
-- O sexo entra nos critérios com limiar dependente de sexo (`sex_specific: true`). No mock: QTc ≤ 460 ms (F) ou
-  ≤ 450 ms (M), e Cornell ≤ 2,0 mV (F) ou ≤ 2,8 mV (M). Sokolow-Lyon (≤ 3,5 mV) não depende de sexo.
-- `findings[].code` é um identificador estável em `UPPER_SNAKE_CASE`. O mock emite `SINUS_RHYTHM`,
-  `SINUS_BRADYCARDIA`, `SINUS_TACHYCARDIA`, `NORMAL_AXIS`, `AXIS_DEVIATION`, `QTC_PROLONGED` e `LVH_VOLTAGE`.
-  A lambda real pode acrescentar novos códigos, desde que documente aqui.
-- O mock **mede** a FC e as amplitudes a partir do sinal recebido (picos R). PR, QRS, QT e o eixo são fixos.
+- `summary` is the **general summary** (main screen). `details` is the **detailed result**.
+- `confidence`: `high` | `medium` | `low`. `measurements.*.value` can be `null` when not measurable.
+- Sex enters the criteria with a sex-dependent threshold (`sex_specific: true`). In the mock: QTc ≤ 460 ms (F) or
+  ≤ 450 ms (M), and Cornell ≤ 2.0 mV (F) or ≤ 2.8 mV (M). Sokolow-Lyon (≤ 3.5 mV) does not depend on sex.
+- `findings[].code` is a stable identifier in `UPPER_SNAKE_CASE`. The mock emits `SINUS_RHYTHM`,
+  `SINUS_BRADYCARDIA`, `SINUS_TACHYCARDIA`, `NORMAL_AXIS`, `AXIS_DEVIATION`, `QTC_PROLONGED` and `LVH_VOLTAGE`.
+  The real lambda may add new codes, as long as they are documented here.
+- The mock **measures** HR and amplitudes from the received signal (R peaks). PR, QRS, QT and the axis are fixed.
 
-## 4. Cenários de teste (só nas lambdas mock)
+## 4. Test scenarios (mock lambdas only)
 
-O cenário é escolhido por `mock.scenario` no payload. Sem esse campo, vale a env `MOCK_SCENARIO` da função e, na falta dela, `success`.
-`mock.code` escolhe o código específico; sem ele, vale o padrão da tabela.
+The scenario is chosen by `mock.scenario` in the payload. Without that field, the function's `MOCK_SCENARIO` env applies and, failing that, `success`.
+`mock.code` picks the specific code; without it, the default in the table applies.
 
-| `mock.scenario` | Leitura | Interpretação | `mock.code` aceito (padrão em **negrito**) |
+| `mock.scenario` | Reading | Interpretation | Accepted `mock.code` (default in **bold**) |
 |---|---|---|---|
-| `success` | `OK`, sinal sintético 72 bpm e overlay | `OK`, ECG normal | — |
-| `success_with_warnings` | `OK_WITH_WARNINGS`: V2 parcial (`null`), aVL saturada e rotação corrigida | `OK_WITH_WARNINGS`: V2 de baixa qualidade e QT pouco confiável | — |
-| `failure` | `ERROR` | `ERROR` | leitura: **`READ_TRACE_EXTRACTION_FAILED`**, `READ_GRID_NOT_FOUND`, `STORAGE_ERROR`, `INTERNAL_ERROR` · interpretação: **`INTERP_NO_QRS_DETECTED`**, `INTERP_SIGNAL_TOO_NOISY`, `INTERNAL_ERROR` |
-| `refused` | `REFUSED`, com prévia | — (inválido: `MOCK_SCENARIO_INVALID`) | **`READ_REFUSED_BLURRY`**, `READ_REFUSED_CROPPED`, `READ_REFUSED_OCCLUDED`, `READ_REFUSED_LOW_CONTRAST`, `READ_REFUSED_NOT_ECG`, `READ_REFUSED_LAYOUT_MISMATCH` |
+| `success` | `OK`, synthetic 72 bpm signal and overlay | `OK`, normal ECG | — |
+| `success_with_warnings` | `OK_WITH_WARNINGS`: V2 partial (`null`), aVL saturated and rotation corrected | `OK_WITH_WARNINGS`: low-quality V2 and unreliable QT | — |
+| `failure` | `ERROR` | `ERROR` | reading: **`READ_TRACE_EXTRACTION_FAILED`**, `READ_GRID_NOT_FOUND`, `STORAGE_ERROR`, `INTERNAL_ERROR` · interpretation: **`INTERP_NO_QRS_DETECTED`**, `INTERP_SIGNAL_TOO_NOISY`, `INTERNAL_ERROR` |
+| `refused` | `REFUSED`, with preview | — (invalid: `MOCK_SCENARIO_INVALID`) | **`READ_REFUSED_BLURRY`**, `READ_REFUSED_CROPPED`, `READ_REFUSED_OCCLUDED`, `READ_REFUSED_LOW_CONTRAST`, `READ_REFUSED_NOT_ECG`, `READ_REFUSED_LAYOUT_MISMATCH` |
 
-Os erros de validação (seções 2.1 e 3.1) são reproduzidos com payloads inválidos de verdade, sem precisar de cenário.
-O overlay do mock leva a marca "MOCK — sinal sintético", para não ser confundido com uma leitura real.
+Validation errors (sections 2.1 and 3.1) are reproduced with genuinely invalid payloads, no scenario needed.
+The mock overlay carries the mark "MOCK — synthetic signal", so it is not confused with a real reading.
 
-## 5. Catálogo de erros
+## 5. Error catalog
 
-`retryable: true` só para `STORAGE_ERROR` e `INTERNAL_ERROR` (falhas transitórias). Todos os outros têm `retryable: false`.
+`retryable: true` only for `STORAGE_ERROR` and `INTERNAL_ERROR` (transient failures). All the others have `retryable: false`.
 
-### Comuns
-| Código | Categoria | Mensagem |
+### Common
+| Code | Category | Message |
 |---|---|---|
-| `INVALID_PAYLOAD` | validation | O payload precisa ser um objeto JSON. |
-| `UNSUPPORTED_CONTRACT_VERSION` | validation | Versão de contrato não suportada; use 1.0. |
-| `REQUEST_ID_INVALID` | validation | request_id ausente ou inválido (use o UUID da tentativa). |
-| `MOCK_SCENARIO_INVALID` | validation | Cenário de teste (mock) inválido. *(só nos mocks)* |
-| `STORAGE_ERROR` | internal | Falha ao ler ou gravar artefatos no S3. |
-| `INTERNAL_ERROR` | internal | Erro interno inesperado na lambda. |
+| `INVALID_PAYLOAD` | validation | The payload must be a JSON object. |
+| `UNSUPPORTED_CONTRACT_VERSION` | validation | Contract version not supported; use 1.0. |
+| `REQUEST_ID_INVALID` | validation | Missing or invalid request_id (use the attempt UUID). |
+| `MOCK_SCENARIO_INVALID` | validation | Invalid test (mock) scenario. *(mocks only)* |
+| `STORAGE_ERROR` | internal | Failed to read or write artifacts in S3. |
+| `INTERNAL_ERROR` | internal | Unexpected internal error in the lambda. |
 
-### Leitura
-| Código | Categoria | Mensagem |
+### Reading
+| Code | Category | Message |
 |---|---|---|
-| `IMAGE_MISSING` | validation | Informe a imagem do ECG (image.bucket e image.key). |
-| `IMAGE_NOT_FOUND` | validation | A imagem informada não existe no S3. |
-| `IMAGE_FORMAT_UNSUPPORTED` | validation | Formato de imagem não suportado; envie JPG, PNG ou WebP. |
-| `IMAGE_TOO_LARGE` | validation | A imagem excede o tamanho máximo de 15 MB. |
-| `IMAGE_TOO_SMALL` | validation | Resolução insuficiente; a imagem deve ter ao menos 800x500 px. |
-| `IMAGE_UNREADABLE` | validation | Não foi possível decodificar a imagem enviada. |
-| `LAYOUT_MISSING` | validation | Informe o layout de derivações (ex.: 3x4+1). |
-| `LAYOUT_UNSUPPORTED` | validation | Layout de derivações não suportado. |
-| `CALIBRATION_INVALID` | validation | Calibração inválida; velocidade 12.5/25/50 mm/s e ganho 5/10/20 mm/mV. |
-| `READ_REFUSED_BLURRY` | refused | A imagem está borrada ou fora de foco; fotografe novamente com o papel nítido. |
-| `READ_REFUSED_CROPPED` | refused | O traçado está cortado nas bordas; enquadre o papel inteiro na foto. |
-| `READ_REFUSED_OCCLUDED` | refused | Há sobreposição sobre o traçado (dedo, reflexo, objeto ou anotação); remova e fotografe novamente. |
-| `READ_REFUSED_LOW_CONTRAST` | refused | Contraste insuficiente entre o traçado e a grade; melhore a iluminação. |
-| `READ_REFUSED_NOT_ECG` | refused | A imagem não parece ser um ECG em papel. |
-| `READ_REFUSED_LAYOUT_MISMATCH` | refused | O layout detectado não corresponde ao layout informado. |
-| `READ_GRID_NOT_FOUND` | processing | Não foi possível detectar a grade milimetrada do papel. |
-| `READ_TRACE_EXTRACTION_FAILED` | processing | Não foi possível extrair o traçado das derivações. |
+| `IMAGE_MISSING` | validation | Provide the ECG image (image.bucket and image.key). |
+| `IMAGE_NOT_FOUND` | validation | The given image does not exist in S3. |
+| `IMAGE_FORMAT_UNSUPPORTED` | validation | Unsupported image format; send JPG, PNG or WebP. |
+| `IMAGE_TOO_LARGE` | validation | The image exceeds the maximum size of 15 MB. |
+| `IMAGE_TOO_SMALL` | validation | Insufficient resolution; the image must be at least 800x500 px. |
+| `IMAGE_UNREADABLE` | validation | Could not decode the uploaded image. |
+| `LAYOUT_MISSING` | validation | Provide the lead layout (e.g. 3x4+1). |
+| `LAYOUT_UNSUPPORTED` | validation | Unsupported lead layout. |
+| `CALIBRATION_INVALID` | validation | Invalid calibration; speed must be 12.5/25/50 mm/s and gain 5/10/20 mm/mV. |
+| `READ_REFUSED_BLURRY` | refused | The image is blurry or out of focus; retake the photo with the paper in sharp focus. |
+| `READ_REFUSED_CROPPED` | refused | The trace is cut off at the edges; frame the whole paper in the photo. |
+| `READ_REFUSED_OCCLUDED` | refused | Something overlaps the trace (finger, glare, object or annotation); remove it and retake the photo. |
+| `READ_REFUSED_LOW_CONTRAST` | refused | Insufficient contrast between the trace and the grid; improve the lighting. |
+| `READ_REFUSED_NOT_ECG` | refused | The image does not look like a paper ECG. |
+| `READ_REFUSED_LAYOUT_MISMATCH` | refused | The detected layout does not match the given layout. |
+| `READ_GRID_NOT_FOUND` | processing | Could not detect the millimeter grid of the paper. |
+| `READ_TRACE_EXTRACTION_FAILED` | processing | Could not extract the trace of the leads. |
 
-### Interpretação
-| Código | Categoria | Mensagem |
+### Interpretation
+| Code | Category | Message |
 |---|---|---|
-| `SEX_MISSING` | validation | Informe o sexo do paciente (patient.sex). |
-| `SEX_INVALID` | validation | Sexo do paciente inválido; use "F" ou "M". |
-| `SIGNAL_MISSING` | validation | Informe o sinal do ECG (signal). |
-| `SIGNAL_INVALID` | validation | Sinal do ECG em formato inválido. |
-| `SIGNAL_SAMPLING_RATE_INVALID` | validation | Taxa de amostragem inválida; use entre 100 e 2000 Hz. |
-| `SIGNAL_LEAD_UNKNOWN` | validation | Derivação desconhecida no sinal. |
-| `SIGNAL_TOO_SHORT` | validation | Sinal curto demais; cada derivação precisa de ao menos 1 s. |
-| `INTERP_NO_QRS_DETECTED` | processing | Nenhum complexo QRS detectado no sinal. |
-| `INTERP_SIGNAL_TOO_NOISY` | processing | Sinal ruidoso demais para interpretação confiável. |
+| `SEX_MISSING` | validation | Provide the patient sex (patient.sex). |
+| `SEX_INVALID` | validation | Invalid patient sex; use "F" or "M". |
+| `SIGNAL_MISSING` | validation | Provide the ECG signal (signal). |
+| `SIGNAL_INVALID` | validation | ECG signal in an invalid format. |
+| `SIGNAL_SAMPLING_RATE_INVALID` | validation | Invalid sampling rate; use between 100 and 2000 Hz. |
+| `SIGNAL_LEAD_UNKNOWN` | validation | Unknown lead in the signal. |
+| `SIGNAL_TOO_SHORT` | validation | Signal too short; each lead needs at least 1 s. |
+| `INTERP_NO_QRS_DETECTED` | processing | No QRS complex detected in the signal. |
+| `INTERP_SIGNAL_TOO_NOISY` | processing | Signal too noisy for a reliable interpretation. |
 
-### Avisos (`warnings[].code`)
-| Código | Lambda | Mensagem |
+### Warnings (`warnings[].code`)
+| Code | Lambda | Message |
 |---|---|---|
-| `LEAD_PARTIAL_TRACE` | leitura | Traçado extraído parcialmente; trechos sem leitura vêm como null. |
-| `LEAD_SATURATED` | leitura | Traçado encosta na derivação vizinha; amplitudes podem estar cortadas. |
-| `IMAGE_ROTATION_CORRECTED` | leitura | A imagem estava inclinada e foi alinhada automaticamente. |
-| `CALIBRATION_PULSE_NOT_FOUND` | leitura | Pulso de calibração não encontrado; usada a calibração informada. |
-| `LEAD_MISSING` | interpretação | Derivação ausente no sinal; critérios que dependem dela foram omitidos. |
-| `LEAD_LOW_QUALITY` | interpretação | Derivação com qualidade baixa; medidas nela são menos confiáveis. |
-| `MEASUREMENT_UNRELIABLE` | interpretação | Medida calculada com baixa confiança. |
+| `LEAD_PARTIAL_TRACE` | reading | Trace only partially extracted; unread stretches are returned as null. |
+| `LEAD_SATURATED` | reading | Trace touches the neighboring lead; amplitudes may be clipped. |
+| `IMAGE_ROTATION_CORRECTED` | reading | The image was tilted and was aligned automatically. |
+| `CALIBRATION_PULSE_NOT_FOUND` | reading | Calibration pulse not found; the provided calibration was used. |
+| `LEAD_MISSING` | interpretation | Lead missing from the signal; criteria that depend on it were skipped. |
+| `LEAD_LOW_QUALITY` | interpretation | Low-quality lead; measurements on it are less reliable. |
+| `MEASUREMENT_UNRELIABLE` | interpretation | Measurement computed with low confidence. |
 
-## 6. Requisitos para as lambdas reais
+## 6. Requirements for the real lambdas
 
-1. Mesmo envelope, mesmos nomes de campo, mesmos códigos. Um código novo entra primeiro neste documento e no
-   catálogo (`ecg_contract`), com versão **minor** (1.1) se for compatível e **major** (2.0) se quebrar algo.
-2. Ignorar o campo `mock`. `meta.engine` passa a identificar o algoritmo real (ex.: `ecg-reading-opencv5`).
-3. Leitura: gravar `overlay.png` (imagem original + gridline + traço) e `signal.json` sob
-   `reading/<request_id>/<run_id>/` no bucket de resultados. Na recusa, `refusal_preview.png` é recomendado, não obrigatório.
-4. Não lançar exceção para erro esperado. Envolver o handler num `try/except` que devolve `INTERNAL_ERROR`.
-5. Rodar a suíte `mock_lambdas/tests` trocando o handler pelo real: os testes de validação e de catálogo valem
-   para as duas implementações. Os testes de cenário são exclusivos do mock.
-6. Timeout: o backend espera até `AWS_LAMBDA_READ_TIMEOUT` (270 s), e a lambda deve terminar em ≤ 240 s.
+1. Same envelope, same field names, same codes. A new code goes first into this document and into the
+   catalog (`ecg_contract`), with a **minor** version (1.1) if compatible and a **major** one (2.0) if it breaks something.
+2. Ignore the `mock` field. `meta.engine` now identifies the real algorithm (e.g. `ecg-reading-opencv5`).
+3. Reading: write `overlay.png` (original image + gridline + trace) and `signal.json` under
+   `reading/<request_id>/<run_id>/` in the results bucket. On refusal, `refusal_preview.png` is recommended, not mandatory.
+4. Do not raise an exception for an expected error. Wrap the handler in a `try/except` that returns `INTERNAL_ERROR`.
+5. Run the `mock_lambdas/tests` suite swapping the handler for the real one: the validation and catalog tests apply
+   to both implementations. The scenario tests are exclusive to the mock.
+6. Timeout: the backend waits up to `AWS_LAMBDA_READ_TIMEOUT` (270 s), and the lambda must finish in ≤ 240 s.
