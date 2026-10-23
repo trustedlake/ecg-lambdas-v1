@@ -20,7 +20,7 @@ CONTIGUOUS = {frozenset(p) for p in (("aVL", "I"), ("II", "aVF"), ("aVF", "III")
                                      ("V1", "V2"), ("V2", "V3"), ("V3", "V4"), ("V4", "V5"), ("V5", "V6"))}
 
 ST_ELEVATION_MV = 0.1
-ST_ELEVATION_V2V3_MV = {"F": 0.15, "M": 0.2}   # men >= 40 y; age is not provided
+ST_ELEVATION_V1V3_MV = {"F": 0.15, "M": 0.2, "M_UNDER_40": 0.25}   # men of unknown age use the >= 40 y value (more sensitive)
 ST_DEPRESSION_MV = 0.05
 Q_MIN_MS, Q_MIN_MV = 40, 0.1
 WIDE_QRS_MS, BORDERLINE_QRS_MS = 120, 110
@@ -31,7 +31,8 @@ HR_LOW, HR_HIGH, PAUSE_S, PAUSE_RELEVANT_S = 50, 100, 1.5, 2.0
 P_MIN_MV = 0.04
 PR_LOW_MS, PR_HIGH_MS = 120, 200
 QTC_HIGH_MS = {"M": 450, "F": 470}
-QTC_SHORT_MS, QT_NEAR_MS = 340, 20
+QTC_SHORT_MS, QTC_SHORT_SUSPECT_MS, QT_NEAR_MS = 340, 370, 20
+P_LONG_MS, P_TALL_MV = 120, 0.25
 T_INVERSION_MV, T_TALL_MV = 0.1, 1.0
 LOW_VOLT_LIMB_MV, LOW_VOLT_PRECORDIAL_MV = 0.5, 1.0
 R_V3_MIN_MV = 0.3
@@ -415,8 +416,9 @@ def _criterion(name, value, unit, limit, sex_specific, reference=None):
             "status": "not_evaluated" if value is None else ("abnormal" if value > limit else "normal")}
 
 
-def diagnose(sex, fs, leads):
-    """leads: [{"name", "samples"}] -> (summary, details, warnings). Checks that cannot be done are listed in details["checks"]."""
+def diagnose(sex, fs, leads, age=None):
+    """leads: [{"name", "samples"}] -> (summary, details, warnings). Checks that cannot be done are listed in details["checks"].
+    age (years, optional) only refines the V1-V3 ST elevation limit for men."""
     warnings, findings, criteria = [], [], []
 
     def find(code, label, severity, evidence, mark=None, marks=None, alert=None):
@@ -578,8 +580,17 @@ def diagnose(sex, fs, leads):
         near = [f"{n} {v} mV (limit {lim} mV)" for n, v, lim in (("Sokolow-Lyon", sok, SOKOLOW_MV), ("Cornell", cor, CORNELL_MV[sex]))
                 if v is not None and v > VOLTAGE_NEAR * lim]
         if near:
+            amp = {"r": r_amp, "s": s_amp}
+            parts = []
+            if sok is not None and sok > VOLTAGE_NEAR * SOKOLOW_MV:
+                parts += [("V1", "s", "Sokolow-Lyon"), (max(("V5", "V6"), key=lambda n: r_amp.get(n) or 0), "r", "Sokolow-Lyon")]
+            if cor is not None and cor > VOLTAGE_NEAR * CORNELL_MV[sex]:
+                parts += [("aVL", "r", "Cornell"), ("V3", "s", "Cornell")]
+            near_marks = [m for m in (
+                _beat_mark_by_key(infos, fs, n, k, f"{k.upper()} wave in {n} (part of {f}, {amp[k][n]:.2f} mV)")
+                for n, k, f in parts if amp[k].get(n) is not None) if m]
             find("LVH_VOLTAGE_BORDERLINE", "Voltage close to the left ventricular hypertrophy limit", "info",
-                 "; ".join(near), alert="review")
+                 "; ".join(near), near_marks[0] if near_marks else None, near_marks or None, alert="review")
     if r_amp.get("V1") is not None and (s_amp.get("V5") is not None or s_amp.get("V6") is not None):
         rv = round(r_amp["V1"] + max(s_amp.get("V5") or 0, s_amp.get("V6") or 0), 2)
         rv_lead = max(("V5", "V6"), key=lambda n: s_amp.get(n) or 0)
@@ -593,7 +604,8 @@ def diagnose(sex, fs, leads):
 
     # ST segment and Q waves : two contiguous leads, aVR excluded.
     st = {n: _stat(i, "st") for n, i in infos.items() if i["beats"] and n != "aVR"}
-    elev = {n for n, v in st.items() if v is not None and v >= (ST_ELEVATION_V2V3_MV[sex] if n in ("V2", "V3") else ST_ELEVATION_MV)}
+    st_v1v3 = ST_ELEVATION_V1V3_MV["M_UNDER_40" if sex == "M" and age is not None and age < 40 else sex]
+    elev = {n for n, v in st.items() if v is not None and v >= (st_v1v3 if n in ("V1", "V2", "V3") else ST_ELEVATION_MV)}
     dep = {n for n, v in st.items() if v is not None and v <= -ST_DEPRESSION_MV}
     q = {n for n, i in infos.items() if n != "aVR" and (_stat(i, "q_ms") or 0) >= Q_MIN_MS and (_stat(i, "q_mv") or 0) >= Q_MIN_MV}
     # ST/Q rules are not validated on photographed traces yet: reported as "possible" with a review alert.
@@ -670,12 +682,12 @@ def diagnose(sex, fs, leads):
                 find("PRE_EXCITATION_PATTERN", "Possible pre-excitation (short PR with wide QRS)", "warning",
                      f"PR {pr} ms and QRS {qrs} ms; {UNVALIDATED}", pr_mark("PR interval"))
             values_extra["ATRIAL_ENLARGEMENT"] = f"P {p_ms} ms, {p_amp:.2f} mV"
-            if p_ms and p_ms > 120:
+            if p_ms and p_ms >= P_LONG_MS:
                 find("LEFT_ATRIAL_ENLARGEMENT", "Possible left atrial enlargement (long P wave)", "warning",
-                     f"P duration {p_ms} ms (> 120) in {p_lead}; {UNVALIDATED}", _range_mark(infos, fs, p_lead, "p_ms", "P wave", "p_lo", "p_hi"))
-            if p_amp is not None and p_amp >= 0.25:
+                     f"P duration {p_ms} ms (≥ {P_LONG_MS}) in {p_lead}; {UNVALIDATED}", _range_mark(infos, fs, p_lead, "p_ms", "P wave", "p_lo", "p_hi"))
+            if p_amp is not None and p_amp > P_TALL_MV:
                 find("RIGHT_ATRIAL_ENLARGEMENT", "Possible right atrial enlargement (tall P wave)", "warning",
-                     f"P amplitude {p_amp:.2f} mV (≥ 0.25) in {p_lead}; {UNVALIDATED}",
+                     f"P amplitude {p_amp:.2f} mV (> {P_TALL_MV}) in {p_lead}; {UNVALIDATED}",
                      _range_mark(infos, fs, p_lead, "p_amp", "P wave", "p_lo", "p_hi", True))
         # Extra P waves between beats (2nd/3rd-degree block): a P-sized bump after the T wave, before the next P.
         bs, x_p, extra_p = infos[p_lead]["beats"], infos[p_lead]["x"], 0
@@ -709,7 +721,10 @@ def diagnose(sex, fs, leads):
             find("LONG_QT", "Possible long QT", "warning", f"QTc {qtc} ms (> {lim} ms, {sex_word}); {UNVALIDATED}", qt_mark())
         elif qtc < QTC_SHORT_MS:
             find("SHORT_QT", "Possible short QT", "warning", f"QTc {qtc} ms (< {QTC_SHORT_MS} ms); {UNVALIDATED}", qt_mark())
-        elif qtc > lim - QT_NEAR_MS or qtc < QTC_SHORT_MS + QT_NEAR_MS:
+        elif qtc < QTC_SHORT_SUSPECT_MS:
+            find("SHORT_QT_SUSPECT", "QTc in the short-QT suspicion range", "info",
+                 f"QTc {qtc} ms (suspicion < {QTC_SHORT_SUSPECT_MS} ms, likely < {QTC_SHORT_MS} ms)", qt_mark(), alert="review")
+        elif qtc > lim - QT_NEAR_MS:
             find("QT_BORDERLINE", "QTc close to a limit", "info", f"QTc {qtc} ms (normal {QTC_SHORT_MS}-{lim})", qt_mark(), alert="review")
 
     # T wave.
@@ -872,7 +887,7 @@ def diagnose(sex, fs, leads):
         "P_WAVE": ("P_WAVE_ABSENT", "AFIB_POSSIBLE", "REGULAR_NARROW_TACHY"),
         "PR_AV_BLOCK": ("FIRST_DEGREE_AV_BLOCK", "SHORT_PR", "PR_BORDERLINE", "AV_BLOCK_HIGH_GRADE", "AV_BLOCK_EXTRA_P"),
         "ATRIAL_ENLARGEMENT": ("LEFT_ATRIAL_ENLARGEMENT", "RIGHT_ATRIAL_ENLARGEMENT"), "PRE_EXCITATION": ("PRE_EXCITATION_PATTERN",),
-        "QT_QTC": ("LONG_QT", "SHORT_QT", "QT_BORDERLINE"), "T_WAVE": ("T_INVERSION", "TALL_T_WAVES"),
+        "QT_QTC": ("LONG_QT", "SHORT_QT", "SHORT_QT_SUSPECT", "QT_BORDERLINE"), "T_WAVE": ("T_INVERSION", "TALL_T_WAVES"),
         "ECTOPIC_BEATS": ("PVC_POSSIBLE", "PAC_POSSIBLE"), "LOW_VOLTAGE": ("LOW_VOLTAGE",), "R_PROGRESSION": ("POOR_R_PROGRESSION",),
         "FASCICULAR_BLOCK": ("LAFB_POSSIBLE", "LPFB_POSSIBLE"), "BRUGADA_PATTERN": ("BRUGADA_PATTERN",),
         "EARLY_REPOLARIZATION": ("EARLY_REPOLARIZATION",), "PACEMAKER": ("PACED_RHYTHM_POSSIBLE",)}

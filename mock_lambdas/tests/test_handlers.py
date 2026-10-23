@@ -128,6 +128,37 @@ class InterpretationTests(unittest.TestCase):
         self.assertEqual(checks["LVH_SOKOLOW_LYON"]["finding_codes"], [])
         self.assertTrue(any("aVL" in m["label"] for m in finding["marks"]) and any("V3" in m["label"] for m in finding["marks"]))
 
+    def test_v1_v3_st_limit_uses_patient_age(self):
+        def lead(name, st):
+            beat = [0.0] * 400
+            beat[190:198] = [0.5, 1.0, 0.5, -0.1, -0.2, -0.1, 0, 0]
+            beat[198:290] = [st] * 92
+            return {"name": name, "samples": beat * 8}
+        names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+        signal = {"sampling_rate_hz": 500, "leads": [lead(n, 0.22 if n in ("V1", "V2") else 0.0) for n in names]}
+
+        def st_codes(patient):
+            result = self.call(signal=signal, patient=patient)["result"]
+            return result["patient"], {f["code"] for f in result["details"]["findings"]}
+        patient, codes = st_codes({"sex": "M"})            # unknown age: 2.0 mm limit
+        self.assertIn("ST_ELEVATION", codes)
+        self.assertNotIn("age_years", patient)
+        patient, codes = st_codes({"sex": "M", "age_years": 30})   # under 40: 2.5 mm limit
+        self.assertNotIn("ST_ELEVATION", codes)
+        self.assertEqual(patient["age_years"], 30)
+        self.assertIn("ST_ELEVATION", st_codes({"sex": "M", "age_years": "thirty"})[1])   # implausible age ignored
+
+    def test_lvh_borderline_has_marks(self):
+        def lead(name, r, s):
+            beat = [0.0] * 400
+            beat[190:198] = [r * 0.5, r, r * 0.5, -s * 0.5, -s, -s * 0.5, 0, 0]
+            return {"name": name, "samples": beat * 8}
+        names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+        signal = {"sampling_rate_hz": 500, "leads": [lead(n, 1.0 if n == "aVL" else 0.6, 0.9 if n == "V3" else 0.2) for n in names]}
+        result = self.call(signal=signal, patient={"sex": "F"})["result"]
+        finding = next(f for f in result["details"]["findings"] if f["code"] == "LVH_VOLTAGE_BORDERLINE")
+        self.assertEqual(len(finding["marks"]), 2)
+
     def test_success_with_warnings(self):
         response = self.call(mock={"scenario": "success_with_warnings"})
         self.assertEqual(response["status"], "OK_WITH_WARNINGS")

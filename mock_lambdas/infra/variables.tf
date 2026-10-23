@@ -36,5 +36,5 @@ variable "mock_scenario" {
 variable "reading_image_tag" {
   type        = string
   description = "Tag of the real reading image in the ECR repo ecg-analyser."
-  default     = "v1-reading"
+  default     = "v7-traced-fallback"
 }
