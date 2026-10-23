@@ -112,6 +112,18 @@ class InterpretationTests(unittest.TestCase):
         self.assertGreaterEqual(result["summary"]["heart_rate_bpm"], 150)
         self.assertEqual(result["summary"]["alert_level"], "urgent")
 
+    def test_cornell_evidence_marks_both_leads(self):
+        def lead(name, r, s):
+            beat = [0.0] * 400
+            beat[190:198] = [r * 0.5, r, r * 0.5, -s * 0.5, -s, -s * 0.5, 0, 0]
+            return {"name": name, "samples": beat * 8}
+        names = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+        signal = {"sampling_rate_hz": 500, "leads": [lead(n, 1.2 if n == "aVL" else 0.6, 1.4 if n == "V3" else 0.2) for n in names]}
+        result = self.call(signal=signal, patient={"sex": "F"})["result"]
+        finding = next(f for f in result["details"]["findings"] if f["code"] == "LVH_VOLTAGE")
+        self.assertEqual(len(finding["marks"]), 2)
+        self.assertTrue(any("aVL" in m["label"] for m in finding["marks"]) and any("V3" in m["label"] for m in finding["marks"]))
+
     def test_success_with_warnings(self):
         response = self.call(mock={"scenario": "success_with_warnings"})
         self.assertEqual(response["status"], "OK_WITH_WARNINGS")
@@ -132,7 +144,12 @@ class InterpretationTests(unittest.TestCase):
 
     def test_flat_signal_has_no_qrs(self):
         flat = {"sampling_rate_hz": 500, "leads": [{"name": "II", "samples": [0.0] * 1000}]}
-        self.assertError(self.call(signal=flat), "INTERP_NO_QRS_DETECTED")
+        result = self.call(signal=flat)["result"]
+        self.assertEqual(result["summary"]["alert_level"], "review")
+        checks = {c["code"]: c for c in result["details"]["checks"]}
+        self.assertEqual(checks["HEART_RATE"]["status"], "not_possible")
+        self.assertEqual(checks["QT_QTC"]["status"], "not_implemented")
+        self.assertTrue(any(r.startswith("Could not check: Heart rate") for r in result["summary"]["alert_reasons"]))
 
     def test_validation_errors(self):
         cases = [
