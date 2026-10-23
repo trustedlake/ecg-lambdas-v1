@@ -22,10 +22,13 @@ EXTRACTOR = Path(os.environ.get('ECG_ANALYSER_EXTRACTOR_PATH') or
 sys.path.insert(0, str(V1))
 if EXTRACTOR.is_dir():
     sys.path[:0] = [str(EXTRACTOR), str(EXTRACTOR.parent)]
-    from lambda_v1 import handler as real_handler
-    import lambda_v1 as real
-    from research_methods.contracts import Extraction, MethodAbstention
-    from research_methods.registry import METHODS
+    try:
+        from lambda_v1 import handler as real_handler
+        import lambda_v1 as real
+        from research_methods.contracts import Extraction, MethodAbstention
+        from research_methods.registry import METHODS
+    except ImportError:   # the reading code lives in real_reading/ now
+        real = None
 else:
     real = None
 
