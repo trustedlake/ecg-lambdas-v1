@@ -1,4 +1,4 @@
-"""Testes do contrato v1 das lambdas mock (sem AWS; S3 falso em memória).
+"""Tests of the v1 contract of the mock lambdas (no AWS; in-memory fake S3).
 
     pip install pillow boto3
     python -m unittest discover -s mock_lambdas/tests -v
@@ -82,7 +82,7 @@ class InterpretationTests(unittest.TestCase):
         summary, details = response["result"]["summary"], response["result"]["details"]
         self.assertEqual(summary["classification"], "normal")
         self.assertEqual(summary["heart_rate_bpm"], 72)
-        self.assertIn("Ritmo sinusal", summary["key_findings"])
+        self.assertIn("Sinus rhythm", summary["key_findings"])
         self.assertEqual(len(details["per_lead"]), 12)
         self.assertIn("NORMAL_AXIS", {f["code"] for f in details["findings"]})
         self.assertTrue(response["result"]["disclaimer"])
@@ -90,7 +90,7 @@ class InterpretationTests(unittest.TestCase):
     def test_sex_changes_thresholds(self):
         female = self.call(patient={"sex": "F"}, mock={"scenario": "success"})["result"]["details"]["criteria"]
         male = self.call(patient={"sex": "M"}, mock={"scenario": "success"})["result"]["details"]["criteria"]
-        self.assertIn("feminino", female[0]["reference"])
+        self.assertIn("female", female[0]["reference"])
         self.assertIn("450", male[0]["reference"])
         self.assertNotEqual(female[1]["reference"], male[1]["reference"])
 
@@ -129,7 +129,7 @@ class InterpretationTests(unittest.TestCase):
     def test_validation_errors(self):
         cases = [
             ({"patient": None}, "SEX_MISSING"),
-            ({"patient": {"sex": "feminino"}}, "SEX_INVALID"),
+            ({"patient": {"sex": "female"}}, "SEX_INVALID"),
             ({"signal": None}, "SIGNAL_MISSING"),
             ({"signal": "x"}, "SIGNAL_INVALID"),
             ({"signal": {"sampling_rate_hz": 500, "leads": []}}, "SIGNAL_MISSING"),
@@ -153,9 +153,9 @@ class CatalogTests(unittest.TestCase):
             self.assertTrue(message)
 
     def test_contract_doc_lists_every_code(self):
-        doc = open(os.path.join(os.path.dirname(ROOT), "CONTRATO_LAMBDAS.md"), encoding="utf-8").read()
+        doc = open(os.path.join(os.path.dirname(ROOT), "LAMBDA_CONTRACT.md"), encoding="utf-8").read()
         missing = [code for code in [*ERRORS, *WARNINGS] if f"`{code}`" not in doc]
-        self.assertEqual(missing, [], "códigos ausentes em CONTRATO_LAMBDAS.md")
+        self.assertEqual(missing, [], "codes missing from LAMBDA_CONTRACT.md")
 
 
 if __name__ == "__main__":

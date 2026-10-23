@@ -1,40 +1,40 @@
 variable "aws_profile" {
   type        = string
-  description = "Profile AWS local (~/.aws/credentials) usado pelo provider."
+  description = "Local AWS profile (~/.aws/credentials) used by the provider."
   default     = "trustedlake"
 }
 
 variable "images_bucket" {
   type        = string
-  description = "Bucket (existente) onde o app sobe as fotos de ECG."
+  description = "Bucket (existing) where the app uploads the ECG photos."
   default     = "ecg-lambdas-images-785236377332-sa-east-1"
 }
 
 variable "results_bucket" {
   type        = string
-  description = "Bucket (existente) onde a leitura grava overlay e sinal."
+  description = "Bucket (existing) where the reading writes the overlay and signal."
   default     = "ecg-lambdas-results-785236377332-sa-east-1"
 }
 
 variable "code_version" {
   type        = string
-  description = "Versão exposta em meta.engine_version (ex.: git sha)."
+  description = "Version exposed in meta.engine_version (e.g. git sha)."
   default     = "dev"
 }
 
 variable "mock_scenario" {
   type        = string
-  description = "Cenário padrão quando o payload não traz mock.scenario. Vazio = success."
+  description = "Default scenario when the payload has no mock.scenario. Empty = success."
   default     = ""
 
   validation {
     condition     = contains(["", "success", "success_with_warnings", "failure", "refused"], var.mock_scenario)
-    error_message = "mock_scenario deve ser vazio, success, success_with_warnings, failure ou refused."
+    error_message = "mock_scenario must be empty, success, success_with_warnings, failure or refused."
   }
 }
 
 variable "reading_image_tag" {
   type        = string
-  description = "Tag da imagem da leitura real no repo ECR ecg-analyser."
+  description = "Tag of the real reading image in the ECR repo ecg-analyser."
   default     = "v1-reading"
 }

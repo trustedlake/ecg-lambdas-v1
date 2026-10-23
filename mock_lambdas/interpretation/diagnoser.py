@@ -9,6 +9,7 @@ measurable instead of being estimated. Stdlib only. No tuning per image.
 """
 
 import math
+import os
 import statistics
 
 LEADS = ("I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6")
@@ -26,7 +27,10 @@ CORNELL_MV = {"F": 2.0, "M": 2.8}
 RVH_MV = 1.05
 HR_LOW, HR_HIGH, PAUSE_S = 50, 100, 2.0
 NAN = float("nan")
-EXPERIMENTAL = False
+MAX_BRIDGED_GAP_S = 0.02   # gaps up to 20 ms are bridged for QRS measurement only
+EXPERIMENTAL = os.environ.get("ECG_EXPERIMENTAL") == "1"   # local evaluation only; never set in production
+MARK_PAD_S = 0.25
+MARK_MAX_S = 4.0
 
 
 class NoQrs(Exception):
@@ -44,6 +48,27 @@ def _median(values):
 def _clean(samples):
     """None -> NaN so gaps are never bridged."""
     return [NAN if v is None else float(v) for v in samples]
+
+
+def _bridge_short_gaps(x, max_len):
+    """Linear fill of interior gaps up to max_len samples, for QRS measurement only.
+
+    The extractor often loses a few pixels on the steep R stroke; without this, a 5 ms hole drops the whole beat.
+    Coverage is still computed on the raw samples, so the gaps stay visible in the quality figures."""
+    x, n, i = list(x), len(x), 0
+    while i < n:
+        if not math.isnan(x[i]):
+            i += 1
+            continue
+        j = i
+        while j < n and math.isnan(x[j]):
+            j += 1
+        if i > 0 and j < n and j - i <= max_len:
+            a, b = x[i - 1], x[j]
+            for t in range(i, j):
+                x[t] = a + (b - a) * (t - i + 1) / (j - i + 1)
+        i = j
+    return x
 
 
 def _has_gap(x, a, b):
@@ -159,25 +184,53 @@ def _count_peaks(seg, prominence):
     return len(keep)
 
 
-def analyse_lead(name, samples, fs):
+def _longest_gap(x):
+    run = best = 0
+    for v in x:
+        run = run + 1 if math.isnan(v) else 0
+        best = max(best, run)
+    return best
+
+
+def _low_reason(i):
+    """Plain-language cause of a low lead: what the extraction produced and what happened to each heartbeat."""
+    cov = round(i["coverage"] * 100)
+    trace = f"{cov}% of the trace extracted (needs 80%), longest hole {round(i['longest_gap_ms'])} ms"
+    if i["coverage"] < 0.8:
+        return trace + (f"; {i['found']} heartbeats found, {len(i['beats'])} usable" if i["found"] else "")
+    if i["found"] == 0:
+        return f"{trace}; no heartbeat detected"
+    return (f"{trace}; {i['found']} heartbeats found, none usable "
+            f"({i['dropped_gap']} cut by holes in the trace, {i['dropped_shape']} with no clear QRS shape)")
+
+
+def analyse_lead(name, samples, fs, px=None):
     x = _clean(samples)
     valid = [v for v in x if not math.isnan(v)]
-    info = {"name": name, "coverage": len(valid) / len(x) if x else 0, "beats": []}
+    info = {"name": name, "coverage": len(valid) / len(x) if x else 0, "beats": [], "raw": x, "px": px,
+            "longest_gap_ms": 1000 * _longest_gap(x) / fs, "found": 0, "dropped_gap": 0, "dropped_shape": 0}
     if len(valid) < fs:
         return info
+    x = _bridge_short_gaps(x, max(int(MAX_BRIDGED_GAP_S * fs), 1))
+    info["x"] = x
     for p in detect_beats(x, fs):
+        info["found"] += 1
         bounds = _qrs_bounds(x, p, fs)
         if not bounds:
+            reach = int(0.14 * fs)
+            lo, hi = max(p - reach, 1), min(p + reach, len(x) - 2)
+            info["dropped_gap" if _has_gap(x, lo - 1, hi + 1) else "dropped_shape"] += 1
             continue
         on, off = bounds
         pre = [v for v in x[max(on - int(0.06 * fs), 0):max(on - int(0.02 * fs), 0) + 1] if not math.isnan(v)]
         seg = x[on:off + 1]
         if len(pre) < 2 or any(math.isnan(v) for v in seg):
+            info["dropped_gap"] += 1
             continue
         ref = sum(pre) / len(pre)
         j60 = off + int(0.06 * fs)
         stv = [v for v in x[max(j60 - int(0.01 * fs), 0):j60 + int(0.01 * fs) + 1] if not math.isnan(v)]
-        r, s = max(seg) - ref, ref - min(seg)
+        r, s = max(max(seg) - ref, 0.0), max(ref - min(seg), 0.0)
         rel = [v - ref for v in x[on:p + 1]]
         q_ms = q_mv = 0.0
         if x[p] >= ref and rel and min(rel) < -0.02:      # negative start before an upright R
@@ -189,10 +242,86 @@ def analyse_lead(name, samples, fs):
                     break
             q_ms, q_mv = 1000 * neg / fs, -min(rel)
         info["beats"].append({
+            "peak": p, "on": on, "off": off,
+            "bridged": any(math.isnan(info["raw"][t]) for t in range(on, off + 1)),
             "dur_ms": 1000 * (off - on) / fs, "r": r, "s": s, "area": sum(v - ref for v in seg) / fs,
             "st": (sum(stv) / len(stv) - ref) if stv else None, "q_ms": q_ms, "q_mv": q_mv,
             "notches": _count_peaks([v - ref for v in seg], 0.2 * max(r, s, 0.05))})
     return info
+
+
+def _beat_near_median(info, key, absolute=False):
+    """The beat whose value is closest to the lead's median: the most representative one to show."""
+    beats = [b for b in info["beats"] if b.get(key) is not None]
+    if not beats:
+        return None
+    val = (lambda b: abs(b[key])) if absolute else (lambda b: b[key])
+    med = _median([val(b) for b in beats])
+    return min(beats, key=lambda b: abs(val(b) - med))
+
+
+def _lead_px(lead):
+    xs, ys = lead.get("x_px"), lead.get("y_px")
+    if not xs or not ys or len(xs) != len(lead["samples"]) or len(ys) != len(xs):
+        return None
+    return xs, ys
+
+
+def _photo_box(info, lo, hi):
+    """Bounding box [x0, y0, x1, y1] in photo pixels of samples lo..hi, or None when positions are unknown."""
+    px = info.get("px")
+    if not px:
+        return None
+    xs = [v for v in px[0][lo:hi + 1] if v is not None]
+    ys = [v for v in px[1][lo:hi + 1] if v is not None]
+    if not xs or not ys:
+        return None
+    return [round(min(xs)), round(min(ys)), round(max(xs)), round(max(ys))]
+
+
+def _mark(info, fs, a, b, label):
+    """Evidence mark: one window of the lead around samples a..b (gaps as None, bridged ranges listed)."""
+    raw, x = info["raw"], info.get("x", info["raw"])
+    pad = int(MARK_PAD_S * fs)
+    lo, hi = max(a - pad, 0), min(b + pad, len(raw) - 1)
+    if hi - lo > int(MARK_MAX_S * fs):
+        mid = (a + b) // 2
+        lo, hi = max(mid - int(MARK_MAX_S * fs / 2), 0), min(mid + int(MARK_MAX_S * fs / 2), len(raw) - 1)
+    bridged, start = [], None
+    for t in range(lo, hi + 1):
+        filled = math.isnan(raw[t]) and not math.isnan(x[t])
+        if filled and start is None:
+            start = t
+        if not filled and start is not None:
+            bridged.append([start - lo, t - 1 - lo])
+            start = None
+    if start is not None:
+        bridged.append([start - lo, hi - lo])
+    return {"lead": info["name"], "sampling_rate_hz": fs, "label": label,
+            "from_index": a - lo, "to_index": b - lo,
+            "samples": [None if math.isnan(v) else round(v, 3) for v in raw[lo:hi + 1]],
+            "bridged": bridged, "photo_box": _photo_box(info, lo, hi),
+            "photo_box_focus": _photo_box(info, a, b)}
+
+
+def _beat_mark(infos, fs, lead, key, label, absolute=False, window=None):
+    info = infos.get(lead)
+    beat = _beat_near_median(info, key, absolute) if info else None
+    if not beat:
+        return None
+    on, off = (beat["on"], beat["off"]) if window is None else (beat["on"], beat["off"] + window)
+    return _mark(info, fs, on, off, label)
+
+
+def _beat_mark_by_key(infos, fs, lead, key, label):
+    return _beat_mark(infos, fs, lead, key, label)
+
+
+def _best_lead(leads, score):
+    """Lead (among those scored, not None) with the highest score."""
+    scored = [(score(n), n) for n in leads]
+    scored = [(v, n) for v, n in scored if v is not None]
+    return max(scored)[1] if scored else None
 
 
 def _stat(info, key):
@@ -214,20 +343,25 @@ def diagnose(sex, fs, leads):
     """leads: [{"name", "samples"}] -> (summary, details, warnings). Raises NoQrs / TooNoisy."""
     warnings, findings, criteria = [], [], []
 
-    def find(code, label, severity, evidence):
-        findings.append({"code": code, "label": label, "severity": severity, "evidence": evidence})
+    def find(code, label, severity, evidence, mark=None, marks=None):
+        # `mark` is the primary evidence window; `marks` lists every window the finding is based on.
+        findings.append({"code": code, "label": label, "severity": severity, "evidence": evidence,
+                         **({"mark": mark} if mark else {}), **({"marks": marks} if marks else {})})
 
     infos = {}
     for lead in leads:
-        cand = analyse_lead(lead["name"], lead["samples"], fs)
+        cand = analyse_lead(lead["name"], lead["samples"], fs, _lead_px(lead))
         if lead["name"] not in infos or len(cand["beats"]) > len(infos[lead["name"]]["beats"]):
             infos[lead["name"]] = cand
 
     # Rate and rhythm: longest strip (lead II preferred on ties).
     longest = max(leads, key=lambda l: (sum(v is not None for v in l["samples"]), l["name"] == "II"))
-    x = _clean(longest["samples"])
+    raw = _clean(longest["samples"])
+    x = _bridge_short_gaps(raw, max(int(MAX_BRIDGED_GAP_S * fs), 1))
     peaks = detect_beats(x, fs)
-    rr = [(b - a) / fs for a, b in zip(peaks, peaks[1:]) if not _has_gap(x, a, b)]
+    spans = [(a, b) for a, b in zip(peaks, peaks[1:]) if not _has_gap(x, a, b)]
+    rr = [(b - a) / fs for a, b in spans]
+    rinfo = {"name": longest["name"], "raw": raw, "x": x, "px": _lead_px(longest)}
     if not rr:
         raise NoQrs()
     hr = round(60 / _median(rr))
@@ -238,15 +372,21 @@ def diagnose(sex, fs, leads):
     if len(rr) >= 4 and cv > 0.15:
         rhythm = "Irregular rhythm"
         find("IRREGULAR_RHYTHM", "Irregular rhythm (P waves not assessed)", "warning",
-             f"RR variation {cv * 100:.0f}% over {len(rr)} intervals; possible atrial fibrillation or ectopy")
+             f"RR variation {cv * 100:.0f}% over {len(rr)} intervals; possible atrial fibrillation or ectopy",
+             _mark(rinfo, fs, *spans[max(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))], "Most irregular interval"))
     else:
         rhythm = "Regular rhythm"
     if hr < HR_LOW:
-        find("BRADYCARDIA", "Low heart rate", "warning", f"{hr} bpm (< {HR_LOW})")
+        k = min(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))
+        find("BRADYCARDIA", "Low heart rate", "warning", f"{hr} bpm (< {HR_LOW})",
+             _mark(rinfo, fs, *spans[k], "Typical beat interval"))
     elif hr >= HR_HIGH:
-        find("TACHYCARDIA", "High heart rate", "warning", f"{hr} bpm (≥ {HR_HIGH})")
+        k = min(range(len(rr)), key=lambda k: abs(rr[k] - _median(rr)))
+        find("TACHYCARDIA", "High heart rate", "warning", f"{hr} bpm (≥ {HR_HIGH})",
+             _mark(rinfo, fs, *spans[k], "Typical beat interval"))
     if max(rr) > PAUSE_S:
-        find("PAUSE", "Pause", "warning", f"longest RR {max(rr):.1f} s (> {PAUSE_S:.0f} s)")
+        find("PAUSE", "Pause", "warning", f"longest RR {max(rr):.1f} s (> {PAUSE_S:.0f} s)",
+             _mark(rinfo, fs, *spans[rr.index(max(rr))], "Longest pause"))
 
     # QRS duration and bundle branch block .
     durations = sorted(d for d in (_stat(i, "dur_ms") for i in infos.values()) if d is not None)
@@ -262,6 +402,8 @@ def diagnose(sex, fs, leads):
     def septal_q(lead):
         return lead in infos and (_stat(infos[lead], "q_ms") or 0) >= Q_MIN_MS
 
+    qrs_lead = _best_lead(infos, lambda n: (-abs(_stat(infos[n], "dur_ms") - qrs) if qrs is not None and _stat(infos[n], "dur_ms") is not None else None))
+    qrs_mark = lambda: _beat_mark(infos, fs, qrs_lead, "dur_ms", "QRS complex")
     if qrs is not None:
         criteria.append(_criterion("QRS duration", qrs, "ms", WIDE_QRS_MS - 1, False, f"< {WIDE_QRS_MS} ms"))
         if qrs >= WIDE_QRS_MS:
@@ -271,27 +413,33 @@ def diagnose(sex, fs, leads):
                     and any((net.get(l) or 0) > 0 for l in ("I", "V6")) and not (septal_q("I") or septal_q("V6")))
             if EXPERIMENTAL and rbbb and not lbbb:
                 find("RBBB_PATTERN", "Pattern suggestive of right bundle branch block", "warning",
-                     f"QRS {qrs} ms (≥ 120) with rSR'-type pattern in V1/V2 and wide S in I/V6")
+                     f"QRS {qrs} ms (≥ 120) with rSR'-type pattern in V1/V2 and wide S in I/V6", qrs_mark())
             elif EXPERIMENTAL and lbbb and not rbbb:
                 find("LBBB_PATTERN", "Pattern suggestive of left bundle branch block", "warning",
-                     f"QRS {qrs} ms (≥ 120), negative V1, positive I/V6 without septal q")
+                     f"QRS {qrs} ms (≥ 120), negative V1, positive I/V6 without septal q", qrs_mark())
             else:
-                find("WIDE_QRS", "Wide QRS (intraventricular conduction delay)", "warning", f"QRS {qrs} ms (≥ 120)")
+                find("WIDE_QRS", "Wide QRS (intraventricular conduction delay)", "warning", f"QRS {qrs} ms (≥ 120)", qrs_mark())
         elif qrs >= BORDERLINE_QRS_MS:
-            find("QRS_BORDERLINE", "Borderline QRS duration", "info", f"QRS {qrs} ms (110–119 ms range)")
+            find("QRS_BORDERLINE", "Borderline QRS duration", "info", f"QRS {qrs} ms (110–119 ms range)", qrs_mark())
 
     # Axis from the net QRS area in I and aVF.
     axis = None
     if net.get("I") is not None and net.get("aVF") is not None and (net["I"] or net["aVF"]):
         axis = round(math.degrees(math.atan2(net["aVF"], net["I"])))
+        axis_lead = "I" if abs(net["I"]) >= abs(net["aVF"]) else "aVF"
+        axis_mark = lambda: _beat_mark(infos, fs, axis_lead, "area", f"QRS in lead {axis_lead}", True)
+        axis_detail = f"net QRS area I {net['I'] * 1000:+.0f} mV·ms, aVF {net['aVF'] * 1000:+.0f} mV·ms"
+        axis_marks = lambda: [m for m in (
+            _beat_mark(infos, fs, n, "area", f"QRS in lead {n}: net area {net[n] * 1000:+.0f} mV·ms", True)
+            for n in ("I", "aVF")) if m] or None
         if -30 <= axis <= 90:
-            find("NORMAL_AXIS", "Normal electrical axis", "info", f"axis {axis}° (−30° to +90°)")
+            find("NORMAL_AXIS", "Normal electrical axis", "info", f"axis {axis}° (normal −30° to +90°); {axis_detail}", axis_mark(), axis_marks())
         elif -90 <= axis < -30:
-            find("LEFT_AXIS_DEVIATION", "Left axis deviation", "warning", f"axis {axis}° (< −30°)")
+            find("LEFT_AXIS_DEVIATION", "Left axis deviation", "warning", f"axis {axis}° (< −30°); {axis_detail}", axis_mark(), axis_marks())
         elif 90 < axis <= 180:
-            find("RIGHT_AXIS_DEVIATION", "Right axis deviation", "warning", f"axis {axis}° (> +90°)")
+            find("RIGHT_AXIS_DEVIATION", "Right axis deviation", "warning", f"axis {axis}° (> +90°); {axis_detail}", axis_mark(), axis_marks())
         else:
-            find("EXTREME_AXIS", "Extreme axis deviation", "warning", f"axis {axis}° (−90° to −180°)")
+            find("EXTREME_AXIS", "Extreme axis deviation", "warning", f"axis {axis}° (−90° to −180°); {axis_detail}", axis_mark(), axis_marks())
 
     # Voltage criteria .
     sok = cor = None
@@ -305,12 +453,18 @@ def diagnose(sex, fs, leads):
     lvh = [f"{n} {v} mV" for n, v, lim in (("Sokolow-Lyon", sok, SOKOLOW_MV), ("Cornell", cor, CORNELL_MV[sex]))
            if v is not None and v > lim]
     if lvh:
-        find("LVH_VOLTAGE", "Voltage criteria for left ventricular hypertrophy", "warning", "; ".join(lvh))
+        cands = ([("V1", "s"), ("V5", "r"), ("V6", "r")] if sok is not None and sok > SOKOLOW_MV
+                 else [("aVL", "r"), ("V3", "s")])
+        amp = {"r": r_amp, "s": s_amp}
+        lvh_lead, lvh_key = max(((n, k) for n, k in cands if amp[k].get(n) is not None), key=lambda c: amp[c[1]][c[0]])
+        find("LVH_VOLTAGE", "Voltage criteria for left ventricular hypertrophy", "warning", "; ".join(lvh),
+             _beat_mark_by_key(infos, fs, lvh_lead, lvh_key, f"Tallest {lvh_key.upper()} wave in {lvh_lead}"))
     if r_amp.get("V1") is not None and (s_amp.get("V5") is not None or s_amp.get("V6") is not None):
         rv = round(r_amp["V1"] + max(s_amp.get("V5") or 0, s_amp.get("V6") or 0), 2)
         if rv > RVH_MV and axis is not None and axis > 90:
             find("RVH_PATTERN", "Pattern suggestive of right ventricular hypertrophy", "warning",
-                 f"R V1 + S V5/V6 {rv} mV (> {RVH_MV}) with right axis")
+                 f"R V1 + S V5/V6 {rv} mV (> {RVH_MV}) with right axis",
+                 _beat_mark_by_key(infos, fs, "V1", "r", "R wave in V1"))
 
     # ST segment and Q waves : two contiguous leads, aVR excluded.
     st = {n: _stat(i, "st") for n, i in infos.items() if i["beats"] and n != "aVR"}
@@ -320,34 +474,40 @@ def diagnose(sex, fs, leads):
     # ST/Q/BBB findings stay off in production until validated (EXPERIMENTAL is only set by the evaluation scripts).
     if EXPERIMENTAL:
         if _contiguous(elev):
+            lead = _best_lead(_contiguous(elev), lambda n: st.get(n))
             find("ST_ELEVATION", "Possible ST elevation in contiguous leads", "critical",
-                 "leads " + ", ".join(_contiguous(elev)))
+                 "leads " + ", ".join(_contiguous(elev)),
+                 _beat_mark(infos, fs, lead, "st", f"ST segment in {lead}", window=int(0.2 * fs)))
         if _contiguous(dep):
+            lead = _best_lead(_contiguous(dep), lambda n: -st[n] if n in st else None)
             find("ST_DEPRESSION", "Possible ST depression in contiguous leads", "warning",
-                 "leads " + ", ".join(_contiguous(dep)))
+                 "leads " + ", ".join(_contiguous(dep)),
+                 _beat_mark(infos, fs, lead, "st", f"ST segment in {lead}", window=int(0.2 * fs)))
         if _contiguous(q):
+            lead = _best_lead(_contiguous(q), lambda n: _stat(infos[n], "q_mv"))
             find("PATHOLOGICAL_Q", "Possible pathological Q waves in contiguous leads", "warning",
-                 "leads " + ", ".join(_contiguous(q)))
+                 "leads " + ", ".join(_contiguous(q)),
+                 _beat_mark(infos, fs, lead, "q_mv", f"Q wave in {lead}"))
 
-    warnings.append({"code": "MEASUREMENT_UNRELIABLE",
-                     "message": "PR, QT, ST and Q-wave findings are not reported: they cannot be located reliably on an extracted trace."})
     per_lead = []
     for name in LEADS:
         if name not in infos:
             continue
         i = infos[name]
         ok = i["coverage"] >= 0.8 and len(i["beats"]) >= 1
+        reason = None if ok else _low_reason(i)
         if not ok:
             warnings.append({"code": "LEAD_LOW_QUALITY", "lead": name})
         per_lead.append({"name": name, "r_amplitude_mv": None if r_amp.get(name) is None else round(r_amp[name], 3),
                          "s_amplitude_mv": None if s_amp.get(name) is None else round(s_amp[name], 3),
-                         "quality": "good" if ok else "low"})
+                         "quality": "good" if ok else "low", "quality_reason": reason,
+                         "estimated": any(b["bridged"] for b in i["beats"])})
 
     abnormal = [f for f in findings if f["severity"] != "info"]
     partial = qrs_conf == "low" or len(per_lead) < 12
     classification = "abnormal" if abnormal else ("borderline" if partial else "normal")
     headline = {"normal": "No abnormal pattern found in the criteria that could be checked",
-                "borderline": "No abnormal pattern found, but only part of the ECG could be checked",
+                "borderline": "No abnormal pattern found in the parts of the ECG that could be read",
                 "abnormal": "Possible abnormalities found; clinical review needed"}[classification]
     summary = {"classification": classification, "headline": headline, "rhythm": rhythm, "heart_rate_bpm": hr,
                "key_findings": [f["label"] for f in (abnormal or findings[:2])],

@@ -52,7 +52,7 @@ def _validate(event):
         raise ContractError('LAYOUT_UNSUPPORTED', details={'received': layout, 'supported': sorted(CONFIG_FOR_LAYOUT)})
     calibration = event.get('calibration')
     if not isinstance(calibration, dict):
-        raise ContractError('CALIBRATION_INVALID', details={'reason': 'calibration obrigatória e explícita'})
+        raise ContractError('CALIBRATION_INVALID', details={'reason': 'calibration is required and must be explicit'})
     cal = {}
     for field, allowed in (('speed_mm_s', SPEEDS_MM_S), ('gain_mm_mv', GAINS_MM_MV)):
         value = calibration.get(field)
@@ -124,7 +124,7 @@ def _config(layout, calibration):
 def _file(key, body, mime):
     bucket = os.environ.get('RESULTS_BUCKET')
     if not bucket:
-        raise ContractError('STORAGE_ERROR', details={'reason': 'RESULTS_BUCKET não definido'})
+        raise ContractError('STORAGE_ERROR', details={'reason': 'RESULTS_BUCKET not set'})
     if _UPLOADS is not None:  # method subprocess: the parent performs the upload
         _UPLOADS.append((bucket, key, body, mime))
     else:
@@ -172,6 +172,14 @@ def _rejection_image(image):
     return preview
 
 
+def _px_list(values):
+    """Photo pixel position of every sample (gaps as null), so findings can be located on the photo."""
+    import numpy as np
+    if values is None:
+        return None
+    return _safe_json(np.round(np.asarray(values, dtype=float), 1).tolist())
+
+
 def _lead_export(result, arrays, grid, cal, layout):
     """Native pixel sampling, gaps as null, rhythm II_longo -> II/rhythm."""
     import numpy as np
@@ -199,6 +207,8 @@ def _lead_export(result, arrays, grid, cal, layout):
             'quality': 'good' if sum(v is not None for v in samples)/len(samples) >= .90 else 'partial',
             'bbox_px': _safe_json(record['box']),
             'baseline_y_px': float(record['baseline_y_px']),
+            'x_px': _px_list(arrays.get(original_name + '__x_px')),
+            'y_px': _px_list(arrays.get(original_name + '__y_px')),
             'samples': samples,
         })
     return fs, leads
@@ -216,8 +226,6 @@ def _warnings(geometry, grid, traces, names):
         label = name[:-6] if name.endswith('_longo') else name
         if float(trace['coverage']) < .90:
             out.append(warning('LEAD_PARTIAL_TRACE', lead=label))
-        if float(trace['unambiguous_fraction']) < .85:
-            out.append(warning('AMBIGUOUS_TRACE', lead=label))
     return out
 
 
@@ -226,7 +234,7 @@ def _verify_selector_model():
     import selector.score as approved_score
     model = Path(approved_score.__file__).resolve().with_name('model_selector.pkl')
     if not model.is_file():
-        raise FileNotFoundError('SELECTOR_UNAVAILABLE: model_selector.pkl não incluído no pacote')
+        raise FileNotFoundError('SELECTOR_UNAVAILABLE: model_selector.pkl not included in the package')
     digest = hashlib.sha256(model.read_bytes()).hexdigest()
     if not digest.startswith('cb0f395367ec'):
         raise RuntimeError('SELECTOR_UNAVAILABLE: model_selector.pkl hash fora do aprovado')
@@ -237,7 +245,7 @@ def _method_run(name, method, image, geometry, grid, config, base):
     from research_methods.frozen_peaks34.ecg.extract import convert
     from research_methods.contracts import Context, MethodAbstention
     from research_methods.frozen_peaks34.ecg.contrast_gate import assess_color_separation
-    from review.overlay import render
+    from review.overlay import render, overlay_geometry
 
     metadata = {'method': name, 'version': method.VERSION, 'status': 'ERROR', 'selector_score': None,
                 'sampling_rate_hz': None, 'reason': None, 'warnings': [],
@@ -265,7 +273,7 @@ def _method_run(name, method, image, geometry, grid, config, base):
             output_image = ('rejection_preview.png', _rejection_image(image))
         elif not grid['valid']:
             metadata['status'] = 'ABSTAINED'
-            metadata['reason'] = 'GRID_CALIBRATION_UNCERTAIN: grade inválida; sinal físico indisponível'
+            metadata['reason'] = 'GRID_CALIBRATION_UNCERTAIN: invalid grid; physical signal unavailable'
             output_image = ('rejection_preview.png', _rejection_image(image))
         else:
             arrays = {}
@@ -297,6 +305,9 @@ def _method_run(name, method, image, geometry, grid, config, base):
                 metadata['selector_score'] = round(score, 3)
                 metadata['sampling_rate_hz'] = round(rate, 5)
                 signal = {'sampling_rate_hz': rate, 'units': 'mV', 'leads': leads,
+                          'image_size_px': [int(image.shape[1]), int(image.shape[0])],
+                          'overlay_offset_px': overlay_geometry(image.shape[1], image.shape[0])[0],
+                          'overlay_size_px': overlay_geometry(image.shape[1], image.shape[0])[1],
                           'layout': config['requested_layout'],
                           'calibration': deepcopy(config['calibration'])}
                 warnings = _warnings(geometry, grid, result.traces, [x['name'] for x in result.leads])

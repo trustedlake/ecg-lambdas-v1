@@ -1,22 +1,22 @@
-> **Integração pendente de deploy:** o read real 2.0 está no `ecg-analyser/extractor/lambda_v1.py`; `mock_lambdas/build.sh` continua empacotando o mock antigo. Veja `CONTRATO_LAMBDAS.md`.
+> **Integration pending deploy:** the real 2.0 read lives in `ecg-analyser/extractor/lambda_v1.py`; `mock_lambdas/build.sh` still packages the old mock. See `LAMBDA_CONTRACT.md`.
 
 # ecg-lambdas-v1
 
-Lambdas de **leitura** e **interpretação** de ECG do projeto ECG, e o contrato v1 entre elas e o backend
+ECG **reading** and **interpretation** lambdas of the ECG project, and the v1 contract between them and the backend
 ([tl-gmiler/ecg-backend](https://github.com/tl-gmiler/ecg-backend)).
 
-| O quê | Onde |
+| What | Where |
 |---|---|
-| Contrato v1: request, response, catálogo de erros, cenários e regras para as lambdas reais | [`CONTRATO_LAMBDAS.md`](CONTRATO_LAMBDAS.md) |
-| Mocks deployados (`ecg-reading`, `ecg-interpretation`), testes, smoke test e Terraform | [`mock_lambdas/`](mock_lambdas/README.md) |
-| Módulo comum (envelope, validação, catálogo), reaproveitável pelas lambdas reais | [`mock_lambdas/ecg_contract/`](mock_lambdas/ecg_contract/__init__.py) |
+| v1 contract: request, response, error catalog, scenarios and rules for the real lambdas | [`LAMBDA_CONTRACT.md`](LAMBDA_CONTRACT.md) |
+| Deployed mocks (`ecg-reading`, `ecg-interpretation`), tests, smoke test and Terraform | [`mock_lambdas/`](mock_lambdas/README.md) |
+| Shared module (envelope, validation, catalog), reusable by the real lambdas | [`mock_lambdas/ecg_contract/`](mock_lambdas/ecg_contract/__init__.py) |
 
-AWS: conta `785236377332`, região `sa-east-1`, profile `trustedlake`.
+AWS: account `785236377332`, region `sa-east-1`, profile `trustedlake`.
 
 ```bash
 pip install pillow boto3
 python -m unittest discover -s mock_lambdas/tests -v
 ```
 
-Este repo é separado do [trustedlake/ecg-lambdas](https://github.com/trustedlake/ecg-lambdas), o pipeline antigo em Docker
-com Step Function. Esta stack só lê os buckets de lá.
+This repo is separate from [trustedlake/ecg-lambdas](https://github.com/trustedlake/ecg-lambdas), the old Docker pipeline
+with a Step Function. This stack only reads the buckets from there.
