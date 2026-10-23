@@ -184,22 +184,48 @@ def _count_peaks(seg, prominence):
     return len(keep)
 
 
-def analyse_lead(name, samples, fs):
+def _longest_gap(x):
+    run = best = 0
+    for v in x:
+        run = run + 1 if math.isnan(v) else 0
+        best = max(best, run)
+    return best
+
+
+def _low_reason(i):
+    """Plain-language cause of a low lead: what the extraction produced and what happened to each heartbeat."""
+    cov = round(i["coverage"] * 100)
+    trace = f"{cov}% of the trace extracted (needs 80%), longest hole {round(i['longest_gap_ms'])} ms"
+    if i["coverage"] < 0.8:
+        return trace + (f"; {i['found']} heartbeats found, {len(i['beats'])} usable" if i["found"] else "")
+    if i["found"] == 0:
+        return f"{trace}; no heartbeat detected"
+    return (f"{trace}; {i['found']} heartbeats found, none usable "
+            f"({i['dropped_gap']} cut by holes in the trace, {i['dropped_shape']} with no clear QRS shape)")
+
+
+def analyse_lead(name, samples, fs, px=None):
     x = _clean(samples)
     valid = [v for v in x if not math.isnan(v)]
-    info = {"name": name, "coverage": len(valid) / len(x) if x else 0, "beats": [], "raw": x}
+    info = {"name": name, "coverage": len(valid) / len(x) if x else 0, "beats": [], "raw": x, "px": px,
+            "longest_gap_ms": 1000 * _longest_gap(x) / fs, "found": 0, "dropped_gap": 0, "dropped_shape": 0}
     if len(valid) < fs:
         return info
     x = _bridge_short_gaps(x, max(int(MAX_BRIDGED_GAP_S * fs), 1))
     info["x"] = x
     for p in detect_beats(x, fs):
+        info["found"] += 1
         bounds = _qrs_bounds(x, p, fs)
         if not bounds:
+            reach = int(0.14 * fs)
+            lo, hi = max(p - reach, 1), min(p + reach, len(x) - 2)
+            info["dropped_gap" if _has_gap(x, lo - 1, hi + 1) else "dropped_shape"] += 1
             continue
         on, off = bounds
         pre = [v for v in x[max(on - int(0.06 * fs), 0):max(on - int(0.02 * fs), 0) + 1] if not math.isnan(v)]
         seg = x[on:off + 1]
         if len(pre) < 2 or any(math.isnan(v) for v in seg):
+            info["dropped_gap"] += 1
             continue
         ref = sum(pre) / len(pre)
         j60 = off + int(0.06 * fs)
@@ -234,6 +260,25 @@ def _beat_near_median(info, key, absolute=False):
     return min(beats, key=lambda b: abs(val(b) - med))
 
 
+def _lead_px(lead):
+    xs, ys = lead.get("x_px"), lead.get("y_px")
+    if not xs or not ys or len(xs) != len(lead["samples"]) or len(ys) != len(xs):
+        return None
+    return xs, ys
+
+
+def _photo_box(info, lo, hi):
+    """Bounding box [x0, y0, x1, y1] in photo pixels of samples lo..hi, or None when positions are unknown."""
+    px = info.get("px")
+    if not px:
+        return None
+    xs = [v for v in px[0][lo:hi + 1] if v is not None]
+    ys = [v for v in px[1][lo:hi + 1] if v is not None]
+    if not xs or not ys:
+        return None
+    return [round(min(xs)), round(min(ys)), round(max(xs)), round(max(ys))]
+
+
 def _mark(info, fs, a, b, label):
     """Evidence mark: one window of the lead around samples a..b (gaps as None, bridged ranges listed)."""
     raw, x = info["raw"], info.get("x", info["raw"])
@@ -255,7 +300,8 @@ def _mark(info, fs, a, b, label):
     return {"lead": info["name"], "sampling_rate_hz": fs, "label": label,
             "from_index": a - lo, "to_index": b - lo,
             "samples": [None if math.isnan(v) else round(v, 3) for v in raw[lo:hi + 1]],
-            "bridged": bridged}
+            "bridged": bridged, "photo_box": _photo_box(info, lo, hi),
+            "photo_box_focus": _photo_box(info, a, b)}
 
 
 def _beat_mark(infos, fs, lead, key, label, absolute=False, window=None):
@@ -303,7 +349,7 @@ def diagnose(sex, fs, leads):
 
     infos = {}
     for lead in leads:
-        cand = analyse_lead(lead["name"], lead["samples"], fs)
+        cand = analyse_lead(lead["name"], lead["samples"], fs, _lead_px(lead))
         if lead["name"] not in infos or len(cand["beats"]) > len(infos[lead["name"]]["beats"]):
             infos[lead["name"]] = cand
 
@@ -313,7 +359,7 @@ def diagnose(sex, fs, leads):
     peaks = detect_beats(x, fs)
     spans = [(a, b) for a, b in zip(peaks, peaks[1:]) if not _has_gap(x, a, b)]
     rr = [(b - a) / fs for a, b in spans]
-    rinfo = {"name": longest["name"], "raw": x}
+    rinfo = {"name": longest["name"], "raw": x, "px": _lead_px(longest)}
     if not rr:
         raise NoQrs()
     hr = round(60 / _median(rr))
@@ -445,8 +491,7 @@ def diagnose(sex, fs, leads):
             continue
         i = infos[name]
         ok = i["coverage"] >= 0.8 and len(i["beats"]) >= 1
-        reason = None if ok else (f"Only {round(i['coverage'] * 100)}% of the trace was extracted (needs 80%)"
-                                  if i["coverage"] < 0.8 else "No heartbeat passed the shape checks in this lead")
+        reason = None if ok else _low_reason(i)
         if not ok:
             warnings.append({"code": "LEAD_LOW_QUALITY", "lead": name})
         per_lead.append({"name": name, "r_amplitude_mv": None if r_amp.get(name) is None else round(r_amp[name], 3),
