@@ -152,7 +152,7 @@ class InterpretationTests(unittest.TestCase):
         self.assertEqual(result["summary"]["alert_level"], "review")
         checks = {c["code"]: c for c in result["details"]["checks"]}
         self.assertEqual(checks["HEART_RATE"]["status"], "not_possible")
-        self.assertEqual(checks["QT_QTC"]["status"], "not_implemented")
+        self.assertEqual(checks["QT_QTC"]["status"], "not_possible")
         self.assertTrue(any(r.startswith("Could not check: Heart rate") for r in result["summary"]["alert_reasons"]))
 
     def test_validation_errors(self):
