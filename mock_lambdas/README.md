@@ -36,11 +36,30 @@ terraform plan  -var="code_version=$(git rev-parse --short HEAD)" -out=tfplan
 terraform apply tfplan
 ```
 
-Independent stack (state `s3://ecg-lambdas-terraform-state/ecg-mock-lambdas/terraform.tfstate`). It only
+Independent stack in us-east-1 (state `s3://ecg-terraform-state-785236377332-us-east-1/ecg-mock-lambdas/terraform.tfstate`). It only
 **reads** the `ecg-lambdas` buckets and changes nothing there. Runtime python3.12 arm64, CloudWatch logs with
 30-day retention. The backend's IAM principal needs `lambda:InvokeFunction` on the ARNs in `terraform output function_arns`.
 
 To switch to the real lambdas, point `AWS_LAMBDA_ECG_READING` / `AWS_LAMBDA_ECG_INTERPRETATION` in the backend to the new functions.
+
+## CI/CD (pipeline `ecg-lambdas`, us-east-1)
+
+A push to `main` of `tl-gmiler/ecg-lambdas-v1` (CodeStar connection `ecg-github`) runs CodePipeline `ecg-lambdas`.
+It deploys straight to production, with no manual approval.
+
+1. **Test** (`ecg-lambdas-test`) and **Build** (`ecg-lambdas-build`) run in parallel. Build creates the `ecg-analyser:<sha7>`
+   image in ECR (no local Docker) and the interpretation zip. The model `model_selector.pkl` is downloaded from
+   `s3://ecg-lambdas-models-785236377332-us-east-1` and checked against `mock_lambdas/real_reading/model.sha256`.
+2. **Deploy** (`ecg-lambdas-deploy`, `ci/deploy.sh`) runs `update-function-code` on `ecg-reading` and `ecg-interpretation`,
+   sets `CODE_VERSION` to the commit, then runs `smoke_aws.py`.
+3. **Rollback:** if the smoke test fails, the previous image, zip and `CODE_VERSION` are restored and the stage fails.
+
+Failures publish to the SNS topic `ecg-alerts` (EventBridge rule `ecg-lambdas-pipeline-failed`).
+Terraform ignores the function code and `CODE_VERSION` (`ignore_changes`), so `apply` never overwrites what the pipeline
+deployed. The ECR repo `ecg-analyser` keeps the last 15 images.
+
+**Manual:** the models bucket `ecg-lambdas-models-785236377332-us-east-1` (versioned) was created by hand. To change the
+model, upload the new file there and update `model.sha256`.
 
 ## The `mock` field
 
