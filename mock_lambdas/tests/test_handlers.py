@@ -122,6 +122,10 @@ class InterpretationTests(unittest.TestCase):
         result = self.call(signal=signal, patient={"sex": "F"})["result"]
         finding = next(f for f in result["details"]["findings"] if f["code"] == "LVH_VOLTAGE")
         self.assertEqual(len(finding["marks"]), 2)
+        checks = {c["code"]: c for c in result["details"]["checks"]}
+        self.assertEqual(checks["LVH_CORNELL"]["finding_codes"], ["LVH_VOLTAGE"])
+        self.assertEqual(checks["LVH_CORNELL"]["alert_level"], "review")
+        self.assertEqual(checks["LVH_SOKOLOW_LYON"]["finding_codes"], [])
         self.assertTrue(any("aVL" in m["label"] for m in finding["marks"]) and any("V3" in m["label"] for m in finding["marks"]))
 
     def test_success_with_warnings(self):
