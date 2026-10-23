@@ -50,7 +50,7 @@ def handler(event, context):
         if scenario == SCENARIO_FAILURE:
             raise ContractError(code or "INTERP_NO_QRS_DETECTED")
         if event.get("mock") is None and not os.environ.get("MOCK_SCENARIO"):
-            result, warnings = _diagnose(sex, rate, leads, event.get("signal") or {})
+            result, warnings = _diagnose(sex, rate, leads, event.get("signal") or {}, _patient_age(event.get("patient")))
         else:
             result, warnings = _interpret(sex, rate, leads, degraded=scenario == SCENARIO_WARNINGS)
         response = env.success(result, warnings)
@@ -75,6 +75,12 @@ def _validate_patient(patient):
     if sex not in SEXES:
         raise ContractError("SEX_INVALID", details={"received": sex, "allowed": list(SEXES)})
     return sex
+
+
+def _patient_age(patient):
+    """Optional patient.age_years; anything that is not a plausible age is ignored (treated as unknown)."""
+    age = patient.get("age_years") if isinstance(patient, dict) else None
+    return age if _is_number(age) and 0 <= age <= 130 else None
 
 
 def _is_number(value):
@@ -112,11 +118,11 @@ def _validate_signal(signal):
 
 # ─── Real interpretation (published rules, see diagnoser.py) ──────────────
 
-def _diagnose(sex, rate, leads, signal=None):
+def _diagnose(sex, rate, leads, signal=None, age=None):
     present = {lead["name"] for lead in leads}
     warnings = [warning("LEAD_MISSING", lead=name) for name in STANDARD_LEADS if name not in present]
     try:
-        summary, details, extra = diagnoser.diagnose(sex, rate, leads)
+        summary, details, extra = diagnoser.diagnose(sex, rate, leads, age)
     except diagnoser.NoQrs:
         raise ContractError("INTERP_NO_QRS_DETECTED")
     except diagnoser.TooNoisy:
@@ -128,7 +134,8 @@ def _diagnose(sex, rate, leads, signal=None):
                 for key in ("image_size_px", "overlay_offset_px", "overlay_size_px"):
                     if signal.get(key):
                         mark[key] = signal[key]
-    return {"patient": {"sex": sex}, "summary": summary, "details": details, "disclaimer": DISCLAIMER}, warnings
+    patient = {"sex": sex, **({"age_years": age} if age is not None else {})}
+    return {"patient": patient, "summary": summary, "details": details, "disclaimer": DISCLAIMER}, warnings
 
 
 # ─── Interpretation (mock) ─────────────────────────────────────────────────────

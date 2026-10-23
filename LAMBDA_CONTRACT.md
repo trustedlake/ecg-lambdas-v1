@@ -86,7 +86,7 @@ The methods can emit `LEAD_PARTIAL_TRACE`, `AMBIGUOUS_TRACE`, `GRID_CALIBRATION_
 
 ## 4. The interpretation contract remains a mock
 
-The `operation: "interpret"` endpoint still accepts `contract_version: "1.0"` and the legacy `signal` format, and also explicitly accepts `"2.0"`. The backend **must not pass** the 2.0 reading `result` directly to interpretation: it must select the best method with `status: "OK"`, download its `files.leads` and send that object as `signal`, together with `patient.sex` and `request_id`. No automatic interpretation call was added to the adapter.
+The `operation: "interpret"` endpoint still accepts `contract_version: "1.0"` and the legacy `signal` format, and also explicitly accepts `"2.0"`. The backend **must not pass** the 2.0 reading `result` directly to interpretation: it must select the best method with `status: "OK"`, download its `files.leads` and send that object as `signal`, together with `patient.sex` and `request_id`. `patient.age_years` (number) is optional: when present it refines the V1–V3 ST elevation limit for men (< 40 y uses 2.5 mm); when absent or not a plausible age the ≥ 40 y value (2.0 mm) is used and the age is not echoed back. No automatic interpretation call was added to the adapter.
 
 Legacy signal compatibility rule: `sampling_rate_hz` between 100–2000, unit `mV`, `leads[].name` among I, II, III, aVR, aVL, aVF, V1–V6, `samples` numbers or `null`, at least 1 valid second per lead; warnings for missing leads. The interpretation is **synthetic** and is not a medical diagnosis. Full specification of the previous mock: `LEGACY_V1_CONTRACT.md`.
 
