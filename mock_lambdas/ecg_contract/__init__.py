@@ -93,6 +93,7 @@ WARNINGS = {
     "METHODS_PARTIAL_RESULT": "Some methods produced no signals; check the individual statuses.",
     "LEAD_PARTIAL_TRACE": "Trace only partially extracted; unread stretches are returned as null.",
     "LEAD_SATURATED": "Trace touches the neighboring lead; amplitudes may be clipped.",
+    "LOW_TRACE_GRID_CONTRAST": "Trace and grid have little colour separation; check the reading by eye.",
     "IMAGE_ROTATION_CORRECTED": "The image was tilted and was aligned automatically.",
     "CALIBRATION_PULSE_NOT_FOUND": "Calibration pulse not found; the provided calibration was used.",
     # Interpretation
