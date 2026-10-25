@@ -10,7 +10,7 @@ This adapter lives **in this repository** (ecg-analyser), keeping v1 as the owne
 2. Presence **and SHA-256 of the approved model** (`model_selector.pkl`, prefix `cb0f395367ec`) verified before downloading and processing the image; if missing/mismatched: `READ_SELECTOR_UNAVAILABLE`.
 3. S3 `head_object/get_object` with limits on size, format and pixels. Decoding with EXIF preserved by `prepare`; the original image is not modified.
 4. `prepare`, `estimate_grid` and six sequential `extract(Context(...))` calls (no parallelism, no dependencies on frozen outputs).
-5. Candidate integrity via `Extraction.validate`; chromatic gate **unchanged**, blocks signal export. An invalid grid implies abstention to avoid fictitious amplitudes.
+5. Candidate integrity via `Extraction.validate`; the chromatic gate only warns (`LOW_TRACE_GRID_CONTRAST`), it never blocks signal export. An unconfirmed grid is used with `GRID_CALIBRATION_UNCERTAIN` (missing axis: the other axis, else the page-width hint).
 6. For each allowed candidate: `convert` the original into physical units; native signal, without resampling the output; score with **`load_leads`, `score_leads`, `record_score`** of the approved model, with no heuristic fallback.
 7. `result.json`, `preview.png` (or `rejection_preview.png`) and `leads.json` under `reading/<request_id>/<run_id>/<method>/`, saved in `RESULTS_BUCKET`. Status and references are returned in `methods[]`.
 8. Final 2.0 envelope, with `REFUSED` if all are blocked/abstained, `ERROR` if none produced a signal and there was an error.

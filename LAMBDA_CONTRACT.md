@@ -1,6 +1,6 @@
 # ECG lambdas contract — reading 2.0, mock interpretation 1.0
 
-**v1 is the base**; the real reading uses `ecg-analyser/extractor/lambda_v1.py` without changing the six algorithms or the chromatic gate. Interpretation is still a mock, without the diagnoser. **No deploy, memory/timeout change, ECR image or cost was authorized.**
+**v1 is the base**; the real reading uses `ecg-analyser/extractor/lambda_v1.py` with the six algorithms; the chromatic gate and the grid check only warn, they never refuse. Interpretation is still a mock, without the diagnoser. **No deploy, memory/timeout change, ECR image or cost was authorized.**
 
 The contract code is in `mock_lambdas/ecg_contract/__init__.py`. The current ZIP build **still packages `reading/mock_handler.py`**, not the real adapter. The real one requires later packaging, including dependencies and the approved model (not distributed in the ZIP).
 
@@ -73,16 +73,16 @@ Expected errors are returned in the envelope, never as a `FunctionError`. `reque
 
 | Individual status | Behavior |
 |---|---|
-| `OK` | Measured extraction and chromatic gate allowed; `result.json`, `preview.png` and `leads.json` in S3. Real `selector_score`. |
-| `BLOCKED` | True chromatic gate; `result.json` and `rejection_preview.png` in S3, **no signal**. |
-| `ABSTAINED` | `MethodAbstention`, invalid grid or no lead measured; JSON and refusal image, no signal. |
+| `OK` | Measured extraction; `result.json`, `preview.png` and `leads.json` in S3. Real `selector_score`. The chromatic gate and an unconfirmed grid never refuse: they only add `LOW_TRACE_GRID_CONTRAST` / `GRID_CALIBRATION_UNCERTAIN`. |
+| `BLOCKED` | No longer emitted by the real reading (the chromatic gate only warns). |
+| `ABSTAINED` | `MethodAbstention` or no lead measured; JSON and refusal image, no signal. |
 | `ERROR` | Unexpected error in the method; JSON persisted, `selector_score=null`, no signal. |
 
 `selector_score` uses exclusively the approved selector (`selector/score.py`: `load_leads`, `score_leads`, `record_score`) on the arrays measured by the method. Immutable `model_selector.pkl` model, SHA-256 starting with `cb0f395367ec`. **A missing file leads to `READ_SELECTOR_UNAVAILABLE`, not to a fictitious score.** Selecting by the highest score is the backend's responsibility. The six methods have research status; `OK` is not clinical validation.
 
 Native rate in Hz = `grid.x.pixels_per_mm × speed_mm_s`; do not resample the export to 500 Hz. In `leads.json` each lead carries `name`, `kind`, `row`, `col`, `start_s`, `duration_s`, `quality`, `coverage`, `bbox_px`, `baseline_y_px`, `samples` (mV), `signal_source` (`analysis`, or `traced_unvalidated` when under 1 s of the lead passed the extractor's validity filter and the traced line is sent instead, with `quality: "uncertain"`; interpretation then forces review). `II_longo` is presented as `II`, `kind: rhythm`. NaN values and invalid samples are exported as `null`. No missing stretch is interpolated for delivery; the internal resampling to 150 Hz is **only for the approved classifier**, preserving the gaps.
 
-The methods can emit `LEAD_PARTIAL_TRACE`, `AMBIGUOUS_TRACE`, `GRID_CALIBRATION_UNCERTAIN`, `GEOMETRY_FALLBACK`, `ORIENTATION_UNCERTAIN` and `METHODS_PARTIAL_RESULT`. `INCOMPLETE_TRACE` was mapped to `LEAD_PARTIAL_TRACE`. General warnings omit `lead` when they have no specific lead (`lead: null` is neither needed nor emitted).
+The methods can emit `LEAD_PARTIAL_TRACE`, `AMBIGUOUS_TRACE`, `GRID_CALIBRATION_UNCERTAIN`, `LOW_TRACE_GRID_CONTRAST`, `GEOMETRY_FALLBACK`, `ORIENTATION_UNCERTAIN` and `METHODS_PARTIAL_RESULT`. `INCOMPLETE_TRACE` was mapped to `LEAD_PARTIAL_TRACE`. General warnings omit `lead` when they have no specific lead (`lead: null` is neither needed nor emitted).
 
 ## 4. The interpretation contract remains a mock
 
@@ -98,7 +98,8 @@ All codes below are defined in `ecg_contract`; all the old codes are in `LEGACY_
 - `READ_REFUSED_UNREADABLE_TRACE` — refusal when all abstained and no chromatic gate blocked.
 - `READ_SELECTOR_UNAVAILABLE` — processing unavailable because the approved model is missing.
 - `AMBIGUOUS_TRACE` — samples with uncertainty/ambiguity.
-- `GRID_CALIBRATION_UNCERTAIN` — grid without consistent calibration.
+- `GRID_CALIBRATION_UNCERTAIN` — grid without consistent calibration; the unconfirmed estimate (or the other axis, or the page-width hint) was used.
+- `LOW_TRACE_GRID_CONTRAST` — the chromatic gate found little colour separation between trace and grid; the signal is still returned.
 - `GEOMETRY_FALLBACK` — geometry by fallback.
 - `ORIENTATION_UNCERTAIN` — uncertain orientation.
 - `METHODS_PARTIAL_RESULT` — at least one method delivered no signal.
@@ -153,6 +154,7 @@ The provided ZIP does not include `selector/model_selector.pkl`, does not includ
 | `METHODS_PARTIAL_RESULT` | warning |
 | `LEAD_PARTIAL_TRACE` | warning |
 | `LEAD_SATURATED` | warning |
+| `LOW_TRACE_GRID_CONTRAST` | warning |
 | `IMAGE_ROTATION_CORRECTED` | warning |
 | `CALIBRATION_PULSE_NOT_FOUND` | warning |
 | `LEAD_MISSING` | warning |

@@ -11,6 +11,5 @@ def extract(context):
     traces = [signal.trace_lead(raw, contrast, lead) for lead in leads]
     gate = contrast_gate.assess_color_separation(context.image, leads, traces, context.grid)
     diagnostics = {'color_gate': gate}
-    if not gate['block']:
-        diagnostics['peak_recovery'] = peak_recovery.recover(context.image, leads, traces)
+    diagnostics['peak_recovery'] = peak_recovery.recover(context.image, leads, traces)
     return Extraction(leads, traces, diagnostics)

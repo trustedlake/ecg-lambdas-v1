@@ -221,13 +221,31 @@ def _lead_export(result, arrays, grid, cal, layout):
     return fs, leads
 
 
+def _usable_grid(grid, image, config):
+    """Never refuse on the grid: fill an unconfirmed estimate and mark it (measured_valid=False)."""
+    if grid['valid']:
+        return grid
+    grid = deepcopy(grid)
+    measured = [grid[a]['pixels_per_mm'] for a in ('x', 'y')
+                if grid[a].get('pixels_per_mm') and math.isfinite(grid[a]['pixels_per_mm'])]
+    hint = image.shape[1] / float(config['grid_width_mm_hint'])
+    for axis in ('x', 'y'):
+        px_mm = grid[axis].get('pixels_per_mm')
+        if not px_mm or not math.isfinite(px_mm):
+            px_mm = measured[0] if measured else hint
+            grid[axis] = {**grid[axis], 'pixels_per_mm': px_mm, 'spacing_px': px_mm * grid['minor_square_mm'],
+                          'source': 'other_axis' if measured else 'page_width_hint'}
+    grid.update(valid=True, measured_valid=False, status='unconfirmed_estimate_used')
+    return grid
+
+
 def _warnings(geometry, grid, traces, names):
     out = []
     if geometry.get('orientation', {}).get('uncertain'):
         out.append(warning('ORIENTATION_UNCERTAIN'))
     if geometry['method'].endswith('fallback'):
         out.append(warning('GEOMETRY_FALLBACK'))
-    if not grid['valid']:
+    if not grid['valid'] or not grid.get('measured_valid', True):
         out.append(warning('GRID_CALIBRATION_UNCERTAIN'))
     for name, trace in zip(names, traces):
         label = name[:-6] if name.endswith('_longo') else name
@@ -274,53 +292,47 @@ def _method_run(name, method, image, geometry, grid, config, base):
                                       'coverage': float(trace['coverage']),
                                       'unambiguous_fraction': float(trace['unambiguous_fraction'])}
                                      for record, trace in zip(result.leads, result.traces)]})
-        if gate['block']:
-            metadata['status'] = 'BLOCKED'
-            metadata['reason'] = str(gate.get('reason') or 'color_gate.block')
-            output_image = ('rejection_preview.png', _rejection_image(image))
-        elif not grid['valid']:
+        # No refusal locks: the colour gate and an unconfirmed grid only flag the result.
+        arrays = {}
+        for lead, trace in zip(result.leads, result.traces):
+            values, calibrated = convert(trace, grid, config['calibration'], config.get('review'), lead['name'])
+            if not calibrated:
+                raise ValueError('Uncalibrated signal rejected')
+            arrays.update({lead['name']+'__'+k: v for k, v in values.items()})
+        rate, leads = _lead_export(result, arrays, grid, config['calibration'], config['requested_layout'])
+        if not leads:
             metadata['status'] = 'ABSTAINED'
-            metadata['reason'] = 'GRID_CALIBRATION_UNCERTAIN: invalid grid; physical signal unavailable'
+            metadata['reason'] = 'No measured nonempty lead'
             output_image = ('rejection_preview.png', _rejection_image(image))
         else:
-            arrays = {}
-            for lead, trace in zip(result.leads, result.traces):
-                values, calibrated = convert(trace, grid, config['calibration'], config.get('review'), lead['name'])
-                if not calibrated:
-                    raise ValueError('Uncalibrated signal rejected')
-                arrays.update({lead['name']+'__'+k: v for k, v in values.items()})
-            rate, leads = _lead_export(result, arrays, grid, config['calibration'], config['requested_layout'])
-            if not leads:
-                metadata['status'] = 'ABSTAINED'
-                metadata['reason'] = 'No measured nonempty lead'
-                output_image = ('rejection_preview.png', _rejection_image(image))
-            else:
-                # Use exactly the approved selector's load_leads+score_leads+record_score;
-                # never substitute appearance-router, fallback scores or retraining.
-                _verify_selector_model()
-                from selector.score import load_leads, score_leads, record_score
-                b = io.BytesIO()
-                np.savez_compressed(b, **arrays)
-                b.seek(0)
-                per_lead = score_leads(load_leads(b))
-                if not per_lead:
-                    raise RuntimeError('Approved selector has no scoreable leads')
-                score = float(record_score(per_lead))
-                if not math.isfinite(score) or not 0 <= score <= 100:
-                    raise RuntimeError('Invalid selector score')
-                metadata['status'] = 'OK'
-                metadata['selector_score'] = round(score, 3)
-                metadata['sampling_rate_hz'] = round(rate, 5)
-                signal = {'sampling_rate_hz': rate, 'units': 'mV', 'leads': leads,
-                          'image_size_px': [int(image.shape[1]), int(image.shape[0])],
-                          'overlay_offset_px': overlay_geometry(image.shape[1], image.shape[0])[0],
-                          'overlay_size_px': overlay_geometry(image.shape[1], image.shape[0])[1],
-                          'layout': config['requested_layout'],
-                          'calibration': deepcopy(config['calibration'])}
-                warnings = _warnings(geometry, grid, result.traces, [x['name'] for x in result.leads])
-                output_image = ('preview.png', render(image, result.leads, result.traces,
-                                grid, config, 'RESEARCH ONLY - UNVALIDATED'))
-                source_row['selector_per_lead'] = _safe_json(per_lead)
+            # Use exactly the approved selector's load_leads+score_leads+record_score;
+            # never substitute appearance-router, fallback scores or retraining.
+            _verify_selector_model()
+            from selector.score import load_leads, score_leads, record_score
+            b = io.BytesIO()
+            np.savez_compressed(b, **arrays)
+            b.seek(0)
+            per_lead = score_leads(load_leads(b))
+            if not per_lead:
+                raise RuntimeError('Approved selector has no scoreable leads')
+            score = float(record_score(per_lead))
+            if not math.isfinite(score) or not 0 <= score <= 100:
+                raise RuntimeError('Invalid selector score')
+            metadata['status'] = 'OK'
+            metadata['selector_score'] = round(score, 3)
+            metadata['sampling_rate_hz'] = round(rate, 5)
+            signal = {'sampling_rate_hz': rate, 'units': 'mV', 'leads': leads,
+                      'image_size_px': [int(image.shape[1]), int(image.shape[0])],
+                      'overlay_offset_px': overlay_geometry(image.shape[1], image.shape[0])[0],
+                      'overlay_size_px': overlay_geometry(image.shape[1], image.shape[0])[1],
+                      'layout': config['requested_layout'],
+                      'calibration': deepcopy(config['calibration'])}
+            warnings = _warnings(geometry, grid, result.traces, [x['name'] for x in result.leads])
+            if gate.get('block'):
+                warnings.append(warning('LOW_TRACE_GRID_CONTRAST'))
+            output_image = ('preview.png', render(image, result.leads, result.traces,
+                            grid, config, 'RESEARCH ONLY - UNVALIDATED'))
+            source_row['selector_per_lead'] = _safe_json(per_lead)
     except MethodAbstention as exc:
         metadata['status'] = 'ABSTAINED'
         metadata['reason'] = str(exc)
@@ -432,7 +444,7 @@ def handler(event, context):
             path = Path(directory)/('input'+suffix)
             path.write_bytes(raw)
             image, geometry = prepare(path, config)
-            grid = estimate_grid(image, config)
+            grid = _usable_grid(estimate_grid(image, config), image, config)
             image.setflags(write=False)
             prefix = f'reading/{env.request_id}/{uuid.uuid4().hex}/'
             rows, _ = _run_methods(METHODS, image, geometry, grid, config, prefix)
