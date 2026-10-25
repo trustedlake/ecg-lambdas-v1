@@ -435,6 +435,10 @@ def handler(event, context):
         raw, suffix = _get_image(source)
         config = _config(layout, calibration)
         config['requested_layout'] = layout
+        # The app already cropped the photo to the ECG; never search for the paper again.
+        config['quad_normalized'] = [[0, 0], [1, 0], [1, 1], [0, 1]]
+        # Rows sit where the app's crop guide puts them, not at whole-paper positions.
+        config['paper_baseline_fractions'] = config['baseline_fractions']
         import cv2
         from research_methods.frozen_peaks34.ecg.preprocess import prepare
         from research_methods.frozen_peaks34.ecg.grid import estimate_grid
