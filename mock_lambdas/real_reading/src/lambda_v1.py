@@ -234,7 +234,7 @@ def _usable_grid(grid, image, config):
         if not px_mm or not math.isfinite(px_mm):
             px_mm = measured[0] if measured else hint
             grid[axis] = {**grid[axis], 'pixels_per_mm': px_mm, 'spacing_px': px_mm * grid['minor_square_mm'],
-                          'source': 'other_axis' if measured else 'page_width_hint'}
+                          'phase_px': 0.0, 'source': 'other_axis' if measured else 'page_width_hint'}
     grid.update(valid=True, measured_valid=False, status='unconfirmed_estimate_used')
     return grid
 

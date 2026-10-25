@@ -67,6 +67,14 @@ def test_grid_without_any_estimate_falls_back_to_page_width():
                                   image, {'grid_width_mm_hint': 250})
     assert grid['x']['pixels_per_mm'] == grid['y']['pixels_per_mm'] == 2.0
     assert grid['x']['source'] == 'page_width_hint'
+    # The review overlay draws the grid from phase_px/spacing_px: a filled axis must render.
+    from review.overlay import render
+    extraction = _Extractor.extract(None)
+    for lead in extraction.leads:
+        lead['color'] = '#1f77b4'
+    preview = render(np.full((100, 500, 3), 240, np.uint8), extraction.leads, extraction.traces, grid,
+                     {'calibration': {'speed_mm_s': 25, 'gain_mm_mv': 10}, 'layout_label': 'test'}, 'TEST')
+    assert preview.size[0] > 500
 
 
 def test_confirmed_grid_is_untouched():
