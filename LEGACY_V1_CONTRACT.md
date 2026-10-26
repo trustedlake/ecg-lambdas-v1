@@ -2,14 +2,14 @@
 
 Source of truth for the contract between the Django backend and the two lambdas:
 
-| Lambda | Mock (this repo, `mock_lambdas/`) | Real (Chris, OpenCV 5) |
+| Lambda | Mock (this repo, `lambdas/`) | Real (Chris, OpenCV 5) |
 |---|---|---|
 | **Reading** (`operation: "read"`) | `ecg-reading` | replaces the mock while keeping this contract |
 | **Interpretation** (`operation: "interpret"`) | `ecg-interpretation` | replaces the mock while keeping this contract |
 
 The backend picks the function by name (env `AWS_LAMBDA_ECG_READING` / `AWS_LAMBDA_ECG_INTERPRETATION`);
 swapping the mock for the real one is just a name change. The code catalog lives in code at
-[`mock_lambdas/ecg_contract/__init__.py`](mock_lambdas/ecg_contract/__init__.py), and the real lambda can
+[`lambdas/ecg_contract/__init__.py`](lambdas/ecg_contract/__init__.py), and the real lambda can
 reuse that module. A test fails if any catalog code is missing from this document.
 
 ## 1. General rules
@@ -301,6 +301,6 @@ The mock overlay carries the mark "MOCK — synthetic signal", so it is not conf
 3. Reading: write `overlay.png` (original image + gridline + trace) and `signal.json` under
    `reading/<request_id>/<run_id>/` in the results bucket. On refusal, `refusal_preview.png` is recommended, not mandatory.
 4. Do not raise an exception for an expected error. Wrap the handler in a `try/except` that returns `INTERNAL_ERROR`.
-5. Run the `mock_lambdas/tests` suite swapping the handler for the real one: the validation and catalog tests apply
+5. Run the `lambdas/tests` suite swapping the handler for the real one: the validation and catalog tests apply
    to both implementations. The scenario tests are exclusive to the mock.
 6. Timeout: the backend waits up to `AWS_LAMBDA_READ_TIMEOUT` (270 s), and the lambda must finish in ≤ 240 s.

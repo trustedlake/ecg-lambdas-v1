@@ -2,7 +2,7 @@
 
 **v1 is the base**; the real reading uses `ecg-analyser/extractor/lambda_v1.py` with the six algorithms; the chromatic gate and the grid check only warn, they never refuse. Interpretation is still a mock, without the diagnoser. **No deploy, memory/timeout change, ECR image or cost was authorized.**
 
-The contract code is in `mock_lambdas/ecg_contract/__init__.py`. The current ZIP build **still packages `reading/mock_handler.py`**, not the real adapter. The real one requires later packaging, including dependencies and the approved model (not distributed in the ZIP).
+The contract code is in `lambdas/ecg_contract/__init__.py`. The current ZIP build **still packages `reading/mock_handler.py`**, not the real adapter. The real one requires later packaging, including dependencies and the approved model (not distributed in the ZIP).
 
 ## 1. Envelope
 

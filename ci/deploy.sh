@@ -35,7 +35,7 @@ deploy() { # $1 image, $2 zip, $3 reading version, $4 interpretation version
 }
 
 deploy "$NEW_IMAGE" "$NEW_ZIP" "$IMAGE_TAG" "$IMAGE_TAG"
-if python mock_lambdas/smoke_aws.py --profile ""; then
+if python lambdas/smoke_aws.py --profile ""; then
   echo "Smoke test passed: $IMAGE_TAG is live."
 else
   echo "Smoke test FAILED: rolling back to $PREV_IMAGE and the previous interpretation package." >&2

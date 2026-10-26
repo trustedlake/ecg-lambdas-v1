@@ -10,11 +10,11 @@ phases:
     runtime-versions:
       python: 3.12
     commands:
-      - python -m pip install --quiet -r mock_lambdas/real_reading/requirements.txt pytest
+      - python -m pip install --quiet -r lambdas/real_reading/requirements.txt pytest
   build:
     commands:
-      - python -m unittest discover -s mock_lambdas/tests -v
-      - python -m pytest mock_lambdas/real_reading/tests -q
+      - python -m unittest discover -s lambdas/tests -v
+      - python -m pytest lambdas/real_reading/tests -q
 
 cache:
   paths:
