@@ -1,6 +1,6 @@
 # ECG reading adapter for `ecg-lambdas-v1` — contract 2.0
 
-Entry point: `lambda_v1.handler(event, context)`, referenced by the v1 shim in `mock_lambdas/reading/handler.py`.
+Entry point: `lambda_v1.handler(event, context)`, referenced by the v1 shim in `lambdas/reading/handler.py`.
 
 This adapter lives **in this repository** (ecg-analyser), keeping v1 as the owner of the envelope/contract errors. There are no calls to frozen evaluation resources (`outputs/lote50_01/...`); six modules come directly from `research_methods.registry`. `baseline_peaks` and the utilities for `prepare`, `grid`, `convert` and `color_gate` use `frozen_peaks34`, whose manifest was verified by the tests. The classifier comes from `selector/score.py` without retraining.
 
@@ -23,7 +23,7 @@ This adapter lives **in this repository** (ecg-analyser), keeping v1 as the owne
 
 ```bash
 cd ecg-lambdas-v1
-PYTHONPATH=mock_lambdas python -m unittest discover -s mock_lambdas/tests -v
+PYTHONPATH=lambdas python -m unittest discover -s lambdas/tests -v
 cd ../ecg-analyser
 PYTHONPATH=extractor python -m unittest discover -s extractor/tests -p 'test_research_methods.py' -v
 PYTHONPATH=extractor python -m unittest discover -s extractor/tests -p 'test_selector.py' -v
@@ -33,7 +33,7 @@ In the first battery the integration tests discover `../ecg-analyser/extractor`.
 
 ## Deploy: not authorized, not performed
 
-No container was published and no Terraform, IAM, timeout, memory or bucket was changed. The v1 `mock_lambdas/build.sh` still builds the **legacy mock reading** package, from `reading/mock_handler.py`, to avoid unintentionally replacing an existing deploy. Do **not** use that build to publish the real adapter.
+No container was published and no Terraform, IAM, timeout, memory or bucket was changed. The v1 `lambdas/build.sh` still builds the **legacy mock reading** package, from `reading/mock_handler.py`, to avoid unintentionally replacing an existing deploy. Do **not** use that build to publish the real adapter.
 
 Once there is a cost/infra decision, package together `ecg_contract`, the `lambda_v1` module, the `ecg`, `research_methods`, `review` modules, `configs`, the `selector` folder + verified `model_selector.pkl` and compatible dependencies, and point the handler to `reading.handler.handler`. v1 currently declares 1769 MB/60 s; ECR, runtime, timeout and memory are pending decisions. `extractor/requirements.txt` in the ZIP still pins `opencv-python-headless==4.13.0.92`; compatibility with OpenCV 5 was not validated here, nor was the AWS environment.
 

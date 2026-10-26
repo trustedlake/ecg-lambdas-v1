@@ -1,7 +1,7 @@
 """Tests of the v1 contract of the mock lambdas (no AWS; in-memory fake S3).
 
     pip install pillow boto3
-    python -m unittest discover -s mock_lambdas/tests -v
+    python -m unittest discover -s lambdas/tests -v
 """
 
 import importlib.util

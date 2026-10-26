@@ -5,7 +5,7 @@ lambdas in each scenario and checks status/code against LAMBDA_CONTRACT.md.
 Without --image the reading success comes from the mock scenario (a blank image is refused by the real reader).
 Interpretation receives the leads.json of the best OK method, as the backend does (contract 2.0).
 
-    python mock_lambdas/smoke_aws.py [--image foto.jpg] [--profile trustedlake]
+    python lambdas/smoke_aws.py [--image foto.jpg] [--profile trustedlake]
 """
 
 import argparse
