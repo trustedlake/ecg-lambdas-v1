@@ -1,10 +1,10 @@
-# CI/CD of the lambdas: CodePipeline V2 (QUEUED) <- GitHub tl-gmiler/ecg-lambdas-v1 (main) -> CodeBuild test || build -> deploy.
+# CI/CD of the lambdas: CodePipeline V2 (QUEUED) <- GitHub trustedlake/ecg-lambdas-v1 (main) -> CodeBuild test || build -> deploy.
 # Buildspecs in ../../ci. The deploy swaps the code (update-function-code), runs smoke_aws.py and rolls back if it fails.
 # terraform apply does not touch the code (ignore_changes in main.tf).
 
 variable "pipeline_repo" {
   type    = string
-  default = "tl-gmiler/ecg-lambdas-v1"
+  default = "trustedlake/ecg-lambdas-v1"
 }
 
 variable "pipeline_branch" {
@@ -14,8 +14,8 @@ variable "pipeline_branch" {
 
 variable "github_connection_name" {
   type        = string
-  description = "CodeStar connection of the tl-gmiler GitHub account (owned by the ecg-backend stack)."
-  default     = "ecg-github"
+  description = "CodeStar connection of the trustedlake GitHub account (owned by the ecg-backend stack)."
+  default     = "ecg-github-frontend"
 }
 
 variable "models_bucket" {

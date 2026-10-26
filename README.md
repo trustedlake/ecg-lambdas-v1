@@ -3,7 +3,7 @@
 # ecg-lambdas-v1
 
 ECG **reading** and **interpretation** lambdas of the ECG project, and the v1 contract between them and the backend
-([tl-gmiler/ecg-backend](https://github.com/tl-gmiler/ecg-backend)).
+([trustedlake/ecg-backend](https://github.com/trustedlake/ecg-backend)).
 
 | What | Where |
 |---|---|
