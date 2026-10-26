@@ -1,69 +1,32 @@
-> **Update (reading contract 2.0):** `reading/handler.py` references the real integration `ecg-analyser/extractor/lambda_v1.py`. The existing ZIP build deliberately keeps the legacy mock in `reading/mock_handler.py` and does NOT publish the real reading. Interpretation is still a mock (contract 1.0). See `../LAMBDA_CONTRACT.md` and `ecg-analyser/extractor/LAMBDA_V1_INTEGRATION.md` before any deploy.
+# Production Lambdas
 
-# ECG reading and interpretation mock lambdas
+The production stack implements [`../LAMBDA_CONTRACT.md`](../LAMBDA_CONTRACT.md) for two functions.
 
-They implement the **v1 contract** ([`../LAMBDA_CONTRACT.md`](../LAMBDA_CONTRACT.md)) with synthetic results,
-to validate the app → backend → lambdas flow before the real algorithms (OpenCV 5).
+| AWS function | Package | Production behavior |
+| --- | --- | --- |
+| `ecg-reading` | `real_reading/` container image | Extracts signals with six independent OpenCV methods, preserves gaps, and scores valid candidates only with the approved Selector model. |
+| `ecg-interpretation` | `interpretation/` ZIP | Validates the extracted signal and returns automated measurements and findings. It is a screening aid and does not replace clinical review. |
 
-| AWS function | Code | What it really does | What is synthetic |
-|---|---|---|---|
-| `ecg-reading` | `reading/mock_handler.py` | validates the payload, reads and decodes the photo from S3, draws the grid and trace over it, writes `overlay.png` and `signal.json` | the signal (72 bpm) and the grid position |
-| `ecg-interpretation` | `../interpretation/handler.py` | validates sex and signal, measures HR and amplitudes on the received signal, applies sex-specific thresholds | PR, QRS, QT and axis |
-
-`ecg_contract/` (envelope, error/warning catalog, layouts) is copied into both packages and can be reused by the real lambdas.
-
-## Scenarios
-
-`"mock": {"scenario": "success | success_with_warnings | failure | refused", "code": "<optional>"}` in the payload.
-Without that field, the function's `MOCK_SCENARIO` env applies (Terraform variable `mock_scenario`) and, failing that, `success`.
-The full table is in section 4 of the contract.
+`ecg_contract/` supplies the shared envelope, validation and error catalog. A request may include the documented `mock` scenario only for controlled test paths; it is not the normal production-reading path.
 
 ## Tests
 
 ```bash
 pip install pillow boto3
-python -m unittest discover -s lambdas/tests -v   # offline, fake S3
-python lambdas/smoke_aws.py                       # against the deployed functions (profile trustedlake)
+python -m unittest discover -s lambdas/tests -v
+python lambdas/smoke_aws.py
 ```
 
-## Deploy (no Docker)
+## CI/CD
 
-```bash
-lambdas/build.sh                                   # builds build/{reading,interpretation}/ (Pillow arm64)
-cd lambdas/infra
-terraform init
-terraform plan  -var="code_version=$(git rev-parse --short HEAD)" -out=tfplan
-terraform apply tfplan
-```
+A push to `main` in `trustedlake/ecg-lambdas-v1` through the `ecg-github-frontend` CodeStar connection starts CodePipeline `ecg-lambdas` in `us-east-1`.
 
-Independent stack in us-east-1 (state `s3://ecg-terraform-state-785236377332-us-east-1/ecg-mock-lambdas/terraform.tfstate`). It only
-**reads** the `ecg-lambdas` buckets and changes nothing there. Runtime python3.12 arm64, CloudWatch logs with
-30-day retention. The backend's IAM principal needs `lambda:InvokeFunction` on the ARNs in `terraform output function_arns`.
+1. Test and Build run in parallel. Build creates the real `ecg-reading` container image in ECR and the interpretation ZIP. It downloads the Selector model from the versioned model bucket and verifies its checksum before building the image.
+2. Deploy publishes both functions, records the commit as `CODE_VERSION`, then runs `smoke_aws.py`.
+3. If the smoke test fails, Deploy restores the previous image, ZIP and code version.
 
-To switch to the real lambdas, point `AWS_LAMBDA_ECG_READING` / `AWS_LAMBDA_ECG_INTERPRETATION` in the backend to the new functions.
+Terraform owns the surrounding infrastructure and ignores function code and `CODE_VERSION`, so a Terraform apply does not overwrite a pipeline release. The approved Selector model and its checksum are release controls; do not replace either as part of a normal deployment.
 
-## CI/CD (pipeline `ecg-lambdas`, us-east-1)
+## Test scenarios
 
-A push to `main` of `tl-gmiler/ecg-lambdas-v1` (CodeStar connection `ecg-github`) runs CodePipeline `ecg-lambdas`.
-It deploys straight to production, with no manual approval.
-
-1. **Test** (`ecg-lambdas-test`) and **Build** (`ecg-lambdas-build`) run in parallel. Build creates the `ecg-analyser:<sha7>`
-   image in ECR (no local Docker) and the interpretation zip. The model `model_selector.pkl` is downloaded from
-   `s3://ecg-lambdas-models-785236377332-us-east-1` and checked against `lambdas/real_reading/model.sha256`.
-2. **Deploy** (`ecg-lambdas-deploy`, `ci/deploy.sh`) runs `update-function-code` on `ecg-reading` and `ecg-interpretation`,
-   sets `CODE_VERSION` to the commit, then runs `smoke_aws.py`.
-3. **Rollback:** if the smoke test fails, the previous image, zip and `CODE_VERSION` are restored and the stage fails.
-
-Failures publish to the SNS topic `ecg-alerts` (EventBridge rule `ecg-lambdas-pipeline-failed`).
-Terraform ignores the function code and `CODE_VERSION` (`ignore_changes`), so `apply` never overwrites what the pipeline
-deployed. The ECR repo `ecg-analyser` keeps the last 15 images.
-
-**Manual:** the models bucket `ecg-lambdas-models-785236377332-us-east-1` (versioned) was created by hand. To change the
-model, upload the new file there and update `model.sha256`.
-
-## The `mock` field
-
-There are no separate mock Lambdas. `ecg-reading` and `ecg-interpretation` accept the field
-`mock: {"scenario": "success" | "success_with_warnings" | "failure" | "refused"}` in the payload
-(interpretation: no `refused`). With it, reading really validates the input and returns a
-synthetic signal in the 2.0 format (6 methods); without it, it runs the real extraction.
+`ecg-reading` and `ecg-interpretation` accept the documented `mock` field for controlled scenarios. The normal reading path omits this field and runs the real extractor. See [`../LAMBDA_CONTRACT.md`](../LAMBDA_CONTRACT.md) for request and response details.

@@ -1,22 +1,24 @@
-> **Integration pending deploy:** the real 2.0 read lives in `ecg-analyser/extractor/lambda_v1.py`; `lambdas/build.sh` still packages the old mock. See `LAMBDA_CONTRACT.md`.
-
 # ecg-lambdas-v1
 
-ECG **reading** and **interpretation** lambdas of the ECG project, and the v1 contract between them and the backend
-([trustedlake/ecg-backend](https://github.com/trustedlake/ecg-backend)).
+Production ECG reading, approved Selector and interpretation components used by [trustedlake/ecg-backend](https://github.com/trustedlake/ecg-backend). The reader preserves gaps and uncertainty in the extracted signal; it does not invent a trace or issue a clinical diagnosis.
 
-| What | Where |
-|---|---|
-| v1 contract: request, response, error catalog, scenarios and rules for the real lambdas | [`LAMBDA_CONTRACT.md`](LAMBDA_CONTRACT.md) |
-| Deployed mocks (`ecg-reading`, `ecg-interpretation`), tests, smoke test and Terraform | [`lambdas/`](lambdas/README.md) |
-| Shared module (envelope, validation, catalog), reusable by the real lambdas | [`lambdas/ecg_contract/`](lambdas/ecg_contract/__init__.py) |
+| Component | Location |
+| --- | --- |
+| Lambda request, response and error contract | [`LAMBDA_CONTRACT.md`](LAMBDA_CONTRACT.md) |
+| Real reader: six independent OpenCV methods, image Lambda and approved Selector | [`lambdas/real_reading/`](lambdas/real_reading/) |
+| Interpretation Lambda, shared contract, tests and Terraform | [`lambdas/`](lambdas/README.md) |
 
-AWS: account `785236377332`, region `us-east-1` (migrated from sa-east-1 on 2026-10-23; state in `ecg-terraform-state-785236377332-us-east-1`), profile `trustedlake`.
+## Production
+
+AWS account `785236377332`, region `us-east-1`. A push to `main` triggers the `ecg-lambdas` CodePipeline through the authorized `ecg-github-frontend` connection.
+
+The pipeline tests the source, builds and publishes the real `ecg-reading` container and the `ecg-interpretation` package, then runs a smoke test. On smoke-test failure it restores the previous Lambda code. The Selector artifact is stored outside Git and its checksum must match the approved model `cb0f395367ec` before reading begins.
+
+## Local checks
 
 ```bash
 pip install pillow boto3
 python -m unittest discover -s lambdas/tests -v
 ```
 
-This repo is separate from [trustedlake/ecg-lambdas](https://github.com/trustedlake/ecg-lambdas), the old Docker pipeline
-with a Step Function. This stack only reads the buckets from there.
+For deployment and recovery, see [the backend deployment guide](https://github.com/trustedlake/ecg-backend/blob/main/docs/deployment.md).
