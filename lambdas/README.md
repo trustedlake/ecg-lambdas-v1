@@ -22,15 +22,15 @@ The full table is in section 4 of the contract.
 
 ```bash
 pip install pillow boto3
-python -m unittest discover -s mock_lambdas/tests -v   # offline, fake S3
-python mock_lambdas/smoke_aws.py                       # against the deployed functions (profile trustedlake)
+python -m unittest discover -s lambdas/tests -v   # offline, fake S3
+python lambdas/smoke_aws.py                       # against the deployed functions (profile trustedlake)
 ```
 
 ## Deploy (no Docker)
 
 ```bash
-mock_lambdas/build.sh                                   # builds build/{reading,interpretation}/ (Pillow arm64)
-cd mock_lambdas/infra
+lambdas/build.sh                                   # builds build/{reading,interpretation}/ (Pillow arm64)
+cd lambdas/infra
 terraform init
 terraform plan  -var="code_version=$(git rev-parse --short HEAD)" -out=tfplan
 terraform apply tfplan

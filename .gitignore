@@ -1,5 +1,5 @@
-mock_lambdas/build/
-mock_lambdas/infra/.terraform/
+lambdas/build/
+lambdas/infra/.terraform/
 *.tfstate
 *.tfstate.*
 *.tfplan
@@ -9,5 +9,5 @@ __pycache__/
 .venv/
 .DS_Store
 
-mock_lambdas/real_reading/models/
-mock_lambdas/real_reading/build/
+lambdas/real_reading/models/
+lambdas/real_reading/build/

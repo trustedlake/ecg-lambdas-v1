@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the ZIP package of the ecg-interpretation lambda in mock_lambdas/build/interpretation/.
+# Builds the ZIP package of the ecg-interpretation lambda in lambdas/build/interpretation/.
 # (ecg-reading is a container image: see real_reading/assemble.sh.)
 set -euo pipefail
 cd "$(dirname "$0")"

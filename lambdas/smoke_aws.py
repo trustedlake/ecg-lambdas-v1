@@ -3,7 +3,7 @@
 Uploads a test photo to mock-smoke/ in the images bucket, invokes both
 lambdas in each scenario and checks status/code against LAMBDA_CONTRACT.md.
 
-    python mock_lambdas/smoke_aws.py [--image foto.jpg] [--profile trustedlake]
+    python lambdas/smoke_aws.py [--image foto.jpg] [--profile trustedlake]
 """
 
 import argparse
