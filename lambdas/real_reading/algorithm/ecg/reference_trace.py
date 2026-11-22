@@ -101,10 +101,16 @@ def trace_reference(context, raw, contrast):
     bases = layout.follow_baselines(ink, lengths, rows, step, reference)
     stroke = layout.stroke_width(ink, lengths, bases, step, reference)
     calibration = config.get('calibration')
+    ink, separators = layout.remove_separators(ink, bases, step, counts, reference, pitch)
     ink, starts, pulses = layout.remove_pulses(
         ink, bases, step, stroke, context.grid, calibration, reference, pitch)
+    ink, end_pulses = layout.remove_end_pulses(
+        ink, bases, step, stroke, context.grid, calibration, reference, pitch)
+    pulses = pulses+end_pulses
     ink, boundaries, markers = layout.section_boundaries(
         ink, bases, step, stroke, counts, starts, context.grid, calibration, reference, pitch)
+    for column, x in separators.items():
+        boundaries[:, column] = x
     ink = remove_spurs(ink, layout.vertical_run_lengths(ink), step, stroke)
     lengths = layout.vertical_run_lengths(ink)
     owned, disputed, strokes = assign_rows(ink, lengths, bases, step, pitch, stroke, reference)

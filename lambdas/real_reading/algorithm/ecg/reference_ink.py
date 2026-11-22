@@ -18,22 +18,35 @@ def ink_score(image, reference):
     paper = cv2.morphologyEx(image, cv2.MORPH_CLOSE, np.ones((size, size), np.uint8))
     paper = cv2.GaussianBlur(paper.astype(np.float32), (0, 0), size*.3)
     relative = np.minimum(1.2, image.astype(np.float32)/np.maximum(paper, 1))
+    red, green, blue = relative[..., 0], relative[..., 1], relative[..., 2]
     darkness = 1-relative.max(2)
-    warmth = np.clip(relative[..., 0]-relative[..., 1:].min(2), 0, 1)
-    return darkness-warmth
+    # Printed grids are red/orange/pink or green; ink is neutral or bluish.
+    printed = np.maximum(red-np.minimum(green, blue), green-np.maximum(red, blue))
+    neutral = darkness-np.clip(printed, 0, 1)
+    return neutral, 1-relative.mean(2)
+
+
+def ink_threshold(local):
+    population = local[local > max(.10, float(np.median(local))+.08)]
+    if population.size < 50:
+        return None
+    levels = (np.clip(population, 0, 1)*255).astype(np.uint8).reshape(-1, 1)
+    return cv2.threshold(levels, 0, 255, cv2.THRESH_OTSU)[0]/255
 
 
 def separate_ink(image, raw, reference):
     """Keep only pixels that the calling method measured and that are not grid."""
     x0, y0, x1, y1 = reference
-    score = ink_score(image, reference)
-    local = score[y0:y1, x0:x1]
-    population = local[local > max(.10, float(np.median(local))+.08)]
-    if population.size < 50:
-        return np.zeros(raw.shape, bool), None
-    levels = (np.clip(population, 0, 1)*255).astype(np.uint8).reshape(-1, 1)
-    threshold = cv2.threshold(levels, 0, 255, cv2.THRESH_OTSU)[0]/255
+    score, absorption = ink_score(image, reference)
+    threshold = ink_threshold(score[y0:y1, x0:x1])
     measured = raw > 0
+    if (threshold is None
+            or (score[y0:y1, x0:x1] > threshold).mean() < .006):
+        # Ink of the same colour as the grid: only how much it absorbs is left.
+        score = absorption
+        threshold = ink_threshold(score[y0:y1, x0:x1])
+        if threshold is None:
+            return np.zeros(raw.shape, bool), None
     strong = measured & (score > threshold)
     weak = (measured & (score > threshold-.07)).astype(np.uint8)
     count, labels = cv2.connectedComponents(weak, connectivity=8)

@@ -140,6 +140,65 @@ def remove_pulses(mask, bases, step, stroke, grid, calibration, reference, pitch
     return cleaned, starts, found
 
 
+def remove_separators(mask, bases, step, counts, reference, pitch):
+    """A printed line crossing every row of sections is a divider, never a stroke."""
+    panels = [row for row, count in enumerate(counts) if count > 1]
+    if len(panels) < 3:
+        return mask, {}
+    height, width = mask.shape
+    cleaned, found = mask.copy(), {}
+    ends = []
+    x0, _, x1, _ = reference
+    for column in range(1, max(counts)):
+        centre = x0+pitch*column
+        left = max(0, int(centre-.2*pitch))
+        right = min(width, int(centre+.2*pitch))
+        at = int(np.clip(centre, 0, width-1))
+        top, bottom = int(bases[panels[0], at]), int(bases[panels[-1], at])
+        if right-left < 3 or bottom-top < step:
+            continue
+        band = cv2.dilate(mask[top:bottom, left:right].astype(np.uint8), np.ones((1, 3), np.uint8))
+        coverage = band.mean(0)
+        best = int(coverage.argmax())
+        if coverage[best] < .95:
+            continue
+        x = left+best
+        a, b = max(0, x-2), min(width, x+3)
+        line = mask[:, a:b].any(1)
+        up, down = top, bottom
+        for direction in (-1, 1):
+            y, lost = top if direction < 0 else bottom, 0
+            while 0 < y < height-1 and lost <= 4:
+                y += direction
+                lost = 0 if line[y] else lost+1
+                if line[y]:
+                    if direction < 0:
+                        up = y
+                    else:
+                        down = y
+        cleaned[up:down+1, a:b] = False
+        found[column] = float(x)
+        ends.append((up, down))
+    # Dividers are printed for every column with the same length. Stacked peaks
+    # can also line up vertically, but not in all columns and not equally long.
+    if (len(found) != max(counts)-1
+            or any(np.ptp(side) > .12*step for side in zip(*ends))):
+        return mask, {}
+    return cleaned, found
+
+
+def remove_end_pulses(mask, bases, step, stroke, grid, calibration, reference, pitch):
+    """A calibration pulse may also be printed after the end of a row."""
+    width = mask.shape[1]
+    x0, y0, x1, y1 = reference
+    mirrored = [width-x1, y0, width-x0, y1]
+    cleaned, _, found = remove_pulses(mask[:, ::-1], bases[:, ::-1], step, stroke,
+                                      grid, calibration, mirrored, pitch)
+    if not found:
+        return mask, []
+    return cleaned[:, ::-1], [[width-x-w, y, w, h] for x, y, w, h in found]
+
+
 def section_boundaries(mask, bases, step, stroke, counts, starts, grid, calibration, reference, pitch):
     """Measured markers divide origins; an agreed column is used where one is hidden."""
     height, width = mask.shape

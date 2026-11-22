@@ -6,6 +6,8 @@ joins rows are free tips followed along their straight measured strokes.
 import cv2
 import numpy as np
 
+# Beyond this many free ends a join is print or texture, not crossing strokes.
+MAX_TIPS = 160
 SLOPES = np.arange(-.45, .4501, .0025, dtype=np.float32)
 
 
@@ -297,8 +299,13 @@ def split_component(mask, local, origin, rows_in, bases, step, stroke):
     for xa, xb in spans:
         rows = bases[:, left+(xa+xb)//2]
         strokes = []
+        ends = {d: list(free_ends(local[:, xa:xb], d)) for d in (1, -1)}
+        if len(ends[1])+len(ends[-1]) > MAX_TIPS:
+            # Undecidable: left as a gap, never assigned by guessing.
+            unresolved[:, xa:xb] |= linked[:, xa:xb]
+            continue
         for direction in (1, -1):
-            for xx, yy in free_ends(local[:, xa:xb], direction):
+            for xx, yy in ends[direction]:
                 tip_x, tip_y = left+xa+xx, top+yy
                 avoid = None
                 # A tip joins two legs; follow each of them when they differ.
