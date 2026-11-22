@@ -11,6 +11,73 @@ from PIL import Image, ImageOps
 from .grid import estimate_grid
 
 
+def measure_vertical_tilt(image, box):
+    """dx/dy of printed vertical grid lines, as a linear function of x.
+
+    Measured from long coloured straight lines around the reference. Without
+    enough evidence nothing is corrected.
+    """
+    x0, y0, x1, y1 = box
+    margin = .25*(y1-y0)
+    top, bottom = max(0, int(y0-margin)), min(image.shape[0], int(y1+margin))
+    rgb = image[top:bottom, x0:x1].astype(np.int16)
+    warmth = rgb[..., 0]-rgb[..., 1:].min(2)
+    printed = (warmth > np.median(warmth)+20).astype(np.uint8)*255
+    # A printed grid is sparse; a texture that fills the area is not a grid.
+    if not .002 < np.count_nonzero(printed)/printed.size < .35:
+        return None
+    length = max(40, int((y1-y0)*.08))
+    lines = cv2.HoughLinesP(printed, 1, np.pi/720, length//2,
+                            minLineLength=length, maxLineGap=4)
+    if lines is None:
+        return None
+    a, b, c, d = lines.reshape(-1, 4).T.astype(float)
+    dy = d-b
+    steep = np.abs(c-a) < .18*np.abs(dy)
+    if steep.sum() < 20:
+        return None
+    x, slope = (a+c)[steep]/2+x0, (c-a)[steep]/dy[steep]
+    weight = np.sqrt(np.abs(dy[steep]))
+    if np.ptp(x) < .5*(x1-x0):
+        return None
+    keep = np.ones(len(x), bool)
+    for _ in range(4):
+        linear = np.polyfit(x[keep], slope[keep], 1, w=weight[keep])
+        error = np.abs(slope-np.polyval(linear, x))
+        keep = error <= max(.006, 3*float(np.median(error)))
+        if keep.sum() < 20:
+            return None
+    if float(np.median(error[keep])) > .012:
+        return None
+    return {'slope_per_px': float(linear[0]), 'slope_at_zero': float(linear[1]),
+            'pivot_y_px': float((y0+y1)/2), 'measured_lines': int(keep.sum())}
+
+
+def upright_verticals(image, tilt):
+    """Make the time axis vertical, retaining the whole photograph."""
+    height, width = image.shape[:2]
+    result = np.empty_like(image)
+    columns = np.arange(width, dtype=np.float32)
+    slopes = tilt['slope_at_zero']+tilt['slope_per_px']*columns
+    for top in range(0, height, 256):
+        ys = np.arange(top, min(height, top+256), dtype=np.float32)
+        map_x = (columns+slopes*(ys[:, None]-tilt['pivot_y_px'])).astype(np.float32)
+        map_y = np.repeat((ys-top)[:, None], width, axis=1)
+        result[top:top+len(ys)] = cv2.remap(image[top:top+len(ys)], map_x, map_y,
+                                            cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return result
+
+
+def working_to_source(geometry, x, y):
+    """Map traced points back to the untouched photograph."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    tilt = geometry.get('vertical_tilt')
+    if tilt:
+        x = x+(tilt['slope_at_zero']+tilt['slope_per_px']*x)*(y-tilt['pivot_y_px'])
+    m = np.asarray(geometry['working_to_source'])
+    return m[0, 0]*x+m[0, 1]*y+m[0, 2], m[1, 0]*x+m[1, 1]*y+m[1, 2]
+
+
 def prepare_reference(source, config, rectangle, rotation_clockwise=0):
     if rotation_clockwise not in (0, 90, 180, 270):
         raise ValueError('Explicit right-angle rotation required')
@@ -43,7 +110,11 @@ def prepare_reference(source, config, rectangle, rotation_clockwise=0):
     x0, y0, x1, y1 = bounds
     if min(x1-x0, y1-y0) < 100:
         raise ValueError('Reference too small to measure the grid')
-    geometry = dict(method='explicit_reference_full_photo', source_size=[sw, sh],
+    tilt = measure_vertical_tilt(image, bounds)
+    if tilt:
+        image = upright_verticals(image, tilt)
+    geometry = dict(method='explicit_reference_full_photo', vertical_tilt=tilt,
+                    source_size=[sw, sh],
                     working_size=[nw, nh], reference_box_px=bounds,
                     source_coordinate_system='decoded_EXIF_oriented_pixels',
                     source_to_working=transform.tolist(),

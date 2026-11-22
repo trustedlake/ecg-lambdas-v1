@@ -35,7 +35,7 @@ def test_trace_can_leave_all_four_reference_edges():
     cv2.polylines(raw,[points],False,1,1)
     config={'baseline_fractions':[.5],'columns':1,'leads':[['I']],
             'rhythm_leads':[],'signal_x_fraction':[0,1],'label_exclusion_fraction':0}
-    result=trace_reference(Context(np.repeat(raw[:,:,None],3,2),config,
+    result=trace_reference(Context(np.repeat((1-raw[:,:,None])*255,3,2),config,
                           {'reference_box_px':[100,120,500,320]},{}),raw,raw.astype(float)*50)
     t=result.traces[0];result.validate(raw.shape)
     assert np.nanmin(t['y_px'])<120
@@ -52,9 +52,52 @@ def test_crossing_keeps_both_origins():
     cv2.polylines(raw,[upper,lower],False,1,1)
     config={'baseline_fractions':[.25,.75],'columns':1,'leads':[['I'],['II']],
             'rhythm_leads':[],'signal_x_fraction':[0,1],'label_exclusion_fraction':0}
-    result=trace_reference(Context(np.repeat(raw[:,:,None],3,2),config,
+    result=trace_reference(Context(np.repeat((1-raw[:,:,None])*255,3,2),config,
                           {'reference_box_px':[100,100,500,300]},{}),raw,raw.astype(float)*50)
     upper_trace,lower_trace=result.traces
     assert np.nanmax(upper_trace['y_px'])>=299
     assert np.nanmax(lower_trace['y_px'])<=250
     assert lower_trace['observed'].sum()>450
+
+
+def _clean(raw):
+    return np.repeat((1-raw[:,:,None])*255,3,2).astype(np.uint8)
+
+
+def test_long_sideways_invasion_keeps_its_origin():
+    raw=np.zeros((500,900),np.uint8)
+    # The first section climbs, runs far above the second one and ends there.
+    first=np.array([[80,300],[330,300],[360,120],[600,120]],np.int32)
+    second=np.array([[454,300],[800,300]],np.int32)
+    cv2.polylines(raw,[first,second],False,1,2)
+    cv2.rectangle(raw,(446,282),(452,318),1,-1)  # printed section marker
+    config={'baseline_fractions':[.5],'columns':2,'leads':[['I','aVR']],'rhythm_leads':[]}
+    result=trace_reference(Context(_clean(raw),config,
+                          {'reference_box_px':[100,150,800,450]},{}),raw,raw.astype(float)*50)
+    a,b=result.traces
+    assert a['x_px'][a['observed']].max()>=598
+    assert np.nanmin(a['y_px'])<=123
+    assert np.nanmin(b['y_px'])>=295
+
+
+def test_downward_excursion_below_reference_reaches_tip():
+    raw=np.zeros((600,700),np.uint8)
+    cv2.polylines(raw,[np.array([[90,250],[300,250],[312,520],[324,250],[640,250]],np.int32)],False,1,3)
+    config={'baseline_fractions':[.5],'columns':1,'leads':[['I']],'rhythm_leads':[]}
+    result=trace_reference(Context(_clean(raw),config,
+                          {'reference_box_px':[120,180,600,320]},{}),raw,raw.astype(float)*50)
+    assert np.nanmax(result.traces[0]['y_px'])>=519
+
+
+def test_submitted_scripts_read_outside_the_reference():
+    from research_methods.submitted_adapter import SUBMITTED_METHODS
+    raw=np.zeros((700,900),np.uint8)
+    for y,tip in ((200,200),(300,300),(400,650)):
+        cv2.polylines(raw,[np.array([[90,y],[400,y],[412,tip],[424,y],[840,y]],np.int32)],False,1,3)
+    config={'baseline_fractions':[1/6,.5,5/6],'columns':4,'rhythm_leads':[],
+            'leads':[['I','aVR','V1','V4'],['II','aVL','V2','V5'],['III','aVF','V3','V6']]}
+    for name,method in SUBMITTED_METHODS.items():
+        result=method.extract(Context(_clean(raw),config,{'reference_box_px':[120,150,800,450]},{}))
+        observed=[t for t in result.traces if t['observed'].any()]
+        assert max(np.nanmax(t['y_max_px']) for t in observed)>=649,name
+        assert max(t['x_px'][t['observed']].max() for t in observed)>=838,name

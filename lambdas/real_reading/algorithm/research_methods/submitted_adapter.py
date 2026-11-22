@@ -21,6 +21,23 @@ NAMES = ('components_close', 'components_boxes', 'components_extents',
          'components_dividers', 'skeleton_path', 'components_bands', 'ink_path', 'band_mask')
 
 
+# Each script's own darkness rule (None = its automatic Otsu rule). With a
+# reference, only this ink evidence is used: their native boxes would cut signal.
+INK_BELOW = {'components_close': 125, 'components_boxes': 85, 'components_extents': 130,
+             'components_dividers': 135, 'skeleton_path': 140, 'components_bands': 110,
+             'ink_path': None, 'band_mask': 140}
+
+
+def reference_evidence(name, image, reference):
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    threshold = INK_BELOW[name]
+    if threshold is None:
+        x0, y0, x1, y1 = reference
+        otsu = cv2.threshold(gray[y0:y1, x0:x1], 0, 255, cv2.THRESH_OTSU)[0]
+        threshold = int(min(175, max(65, otsu)))
+    return (gray < threshold).astype(np.uint8), 255.-gray
+
+
 def column_trace(points, width, height, name, full_x=None):
     """Keep absent columns NaN. Never interpolate a path across missing ink."""
     pts = np.asarray(points, dtype=float).reshape(-1, 2)
@@ -60,6 +77,11 @@ class SubmittedMethod:
     def extract(self, context, artifact_dir=None):
         if context.config['leads'] != [['I','aVR','V1','V4'], ['II','aVL','V2','V5'], ['III','aVF','V3','V6']]:
             raise MethodAbstention('Submitted scripts require explicit 3x4 layout')
+        if 'reference_box_px' in context.geometry:
+            from ecg.reference_trace import trace_reference
+            raw, contrast = reference_evidence(self.name, context.image,
+                                               context.geometry['reference_box_px'])
+            return trace_reference(context, raw, contrast)
         with tempfile.TemporaryDirectory(prefix='ecg_submitted_') as tmp:
             target = Path(artifact_dir) if artifact_dir else Path(tmp)/'artifacts'
             target.mkdir(parents=True, exist_ok=True)

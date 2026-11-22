@@ -204,10 +204,15 @@ def _lead_export(result, arrays, grid, cal, layout):
         name = original_name[:-6] if rhythm else original_name
         row = int(record['row'])
         col = int(record.get('column', 0))
+        start_s = 0.0 if rhythm else col * 10.0/columns
+        times = arrays.get(original_name + '__time_s')
+        if 'time_origin_x_px' in record and times is not None:
+            # A trace read from the whole photo may begin before its section.
+            start_s += float(times[0])
         leads.append({
             'name': name, 'kind': 'rhythm' if rhythm else 'panel',
             'row': row, 'col': col,
-            'start_s': 0.0 if rhythm else round(col * 10.0/columns, 4),
+            'start_s': round(start_s, 4),
             'duration_s': round(len(samples)/fs, 4),
             'coverage': round(sum(v is not None for v in samples)/len(samples), 4),
             'quality': 'uncertain' if uncertain else 'good' if sum(v is not None for v in samples)/len(samples) >= .90 else 'partial',
@@ -267,7 +272,7 @@ def _verify_selector_model():
 
 def _method_run(name, method, image, geometry, grid, config, base):
     import numpy as np
-    from research_methods.frozen_peaks34.ecg.extract import convert
+    from ecg.extract import convert  # canonical: honours an explicit time origin
     from research_methods.contracts import Context, MethodAbstention
     from research_methods.frozen_peaks34.ecg.contrast_gate import assess_color_separation
     from review.overlay import render, overlay_geometry

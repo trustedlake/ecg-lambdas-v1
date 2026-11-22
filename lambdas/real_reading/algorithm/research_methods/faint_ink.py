@@ -11,8 +11,9 @@ VERSION = 'slanted-grid-crossings'
 def extract(context):
     raw, contrast = signal_tinted.ink_evidence(context.image)
     if 'reference_box_px' in context.geometry:
-        from ecg.reference_trace import reference_leads
-        leads = reference_leads(raw, context.config, context.geometry)
+        _, y0, _, y1 = context.geometry['reference_box_px']
+        # Only a scale for the background filter; rows are measured when tracing.
+        leads = [{'row_spacing_px': (y1-y0)/len(context.config['baseline_fractions'])}]
     else:
         leads = signal_tinted.locate_leads(raw, context.config, context.geometry)
     extra, _ = signal_tinted.stroke_evidence(context.image)
