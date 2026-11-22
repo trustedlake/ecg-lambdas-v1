@@ -26,8 +26,16 @@ def extract(context):
     red=colors[...,0]
     length=max(31,int(np.median([l['row_spacing_px'] for l in leads])*2)|1)
     # Robust directional background includes sustained grid but not short waves.
-    v=median_filter(red,size=(length,1),mode='nearest')
-    h=median_filter(red,size=(1,length),mode='nearest')
+    if 'reference_box_px' in context.geometry:
+        # The whole photo is much larger. Sample only along each filtered axis,
+        # which keeps the printed lines of the other axis sharp.
+        height, width = red.shape
+        size = max(3, (length//8) | 1)
+        v=cv2.resize(median_filter(red[::8],size=(size,1),mode='nearest'),(width,height))
+        h=cv2.resize(median_filter(red[:,::8],size=(1,size),mode='nearest'),(width,height))
+    else:
+        v=median_filter(red,size=(length,1),mode='nearest')
+        h=median_filter(red,size=(1,length),mode='nearest')
     background=np.minimum(v,h)
     detail=background-red
     neutral = np.ptp(colors,axis=2)<12
