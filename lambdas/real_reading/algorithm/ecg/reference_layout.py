@@ -188,6 +188,11 @@ def section_boundaries(mask, bases, step, stroke, counts, starts, grid, calibrat
         for row in {o[0] for o in near}:
             chosen = min((o for o in near if o[0] == row), key=lambda o: abs(o[1]-agreed))
             boundaries[row, column] = chosen[1]
-            cleaned[chosen[2], chosen[3]] = False
+            x, y, w, h = chosen[4]
+            # Printing has a soft edge one pixel wide around the solid bar.
+            for side in (-1, 0, 1):
+                cleaned[chosen[2], (chosen[3]+side).clip(0, width-1)] = False
+            cleaned[max(0, y-2):y, max(0, x):x+w] = False
+            cleaned[y+h:y+h+2, max(0, x):x+w] = False
             markers.append(chosen[4])
     return cleaned, boundaries, markers

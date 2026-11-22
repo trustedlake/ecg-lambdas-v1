@@ -6,6 +6,7 @@ sections. Exported samples are always measured pixels, including stroke tips.
 import cv2
 import numpy as np
 from . import reference_layout as layout
+from .config import COLORS
 from .reference_ink import separate_ink, remove_spurs
 from .reference_ownership import assign_rows, assign_sections, release_labels
 
@@ -137,6 +138,7 @@ def trace_reference(context, raw, contrast):
             valid = observed & ~ambiguous
             found = np.flatnonzero(observed)
             lead = dict(name=name, row=row, column=column, baseline_y_px=baseline,
+                        color=COLORS.get(name, '#344b5c'),
                         row_spacing_px=step, trace_x=[left, right], time_origin_x_px=origin,
                         box=[left, int(np.nanmin(low)) if found.size else int(baseline),
                              right, int(np.nanmax(high))+1 if found.size else int(baseline)+1])

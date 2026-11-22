@@ -499,4 +499,20 @@ def release_labels(ink, owned, markers, step, stroke):
                 selected = labels[b:b+tall, a:a+wide] == k
                 owned[:, top+b:top+b+tall, left+a:left+a+wide][:, selected] = False
                 found.append([int(left+a), int(top+b), int(wide), int(tall)])
+        glyphs = [g for g in found if left <= g[0] < right and top <= g[1] < bottom]
+        if len(glyphs) < 2:
+            continue
+        # A last letter may be fused to the wave. Letters share one printed
+        # bottom line; only ink that ends exactly on that line is lettering.
+        line = int(np.median([g[1]+g[3] for g in glyphs]))
+        first = int(min(g[1] for g in glyphs))+1
+        a = min(g[0]+g[2] for g in glyphs)
+        b = min(width, int(max(g[0]+g[2] for g in glyphs)+.12*step))
+        if line-2 <= first or b <= a:
+            continue
+        for part in owned[:, first:min(height, line+3), a:b]:
+            below = part[line-first+1:].any(0)
+            ends = part[line-first-2:line-first+1].any(0) & ~below
+            lettering = cv2.dilate(ends.astype(np.uint8)[None], np.ones((1, 13), np.uint8))[0] > 0
+            part[:, lettering & ~below] = False
     return found
