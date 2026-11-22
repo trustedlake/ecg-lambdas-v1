@@ -6,6 +6,10 @@ VERSION = 'peaks34-323b4e6'
 
 
 def extract(context):
+    if 'reference_box_px' in context.geometry:
+        from ecg.reference_trace import trace_reference
+        raw, contrast = signal.ink_evidence(context.image)
+        return trace_reference(context, raw, contrast)
     raw, contrast = signal.ink_evidence(context.image)
     leads = signal.locate_leads(raw, context.config, context.geometry)
     traces = [signal.trace_lead(raw, contrast, lead) for lead in leads]

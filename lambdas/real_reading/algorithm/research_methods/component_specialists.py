@@ -72,6 +72,9 @@ def component_trace(context, monochrome=False):
         raw &= measured.astype(np.uint8)
     if raw.mean() < .0001:
         raise MethodAbstention('Insufficient measured ink after grid separation')
+    if 'reference_box_px' in context.geometry:
+        from ecg.reference_trace import trace_reference
+        return trace_reference(context, raw, contrast)
     leads = locate_leads(raw, context.config, context.geometry)
     h,w = raw.shape
     # Remove page-length straight structures before following connected strokes.

@@ -10,7 +10,11 @@ VERSION = 'slanted-grid-crossings'
 
 def extract(context):
     raw, contrast = signal_tinted.ink_evidence(context.image)
-    leads = signal_tinted.locate_leads(raw, context.config, context.geometry)
+    if 'reference_box_px' in context.geometry:
+        from ecg.reference_trace import reference_leads
+        leads = reference_leads(raw, context.config, context.geometry)
+    else:
+        leads = signal_tinted.locate_leads(raw, context.config, context.geometry)
     extra, _ = signal_tinted.stroke_evidence(context.image)
     colors = context.image.astype(np.float32)
     scale = max(9, round(min(raw.shape) * .016) | 1)
@@ -28,6 +32,9 @@ def extract(context):
     neutral = np.ptp(colors,axis=2)<12
     raw=(((detail>18)&(absorption>8)) | ((raw>0)&neutral)).astype(np.uint8)
     contrast=np.maximum(0,detail)
+    if 'reference_box_px' in context.geometry:
+        from ecg.reference_trace import trace_reference
+        return trace_reference(context, raw, contrast)
     extra=raw>0
     crossing = (colors.max(axis=2) < 210) & (np.ptp(colors, axis=2) < 90) & (absorption > 12)
     traces = []

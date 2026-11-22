@@ -19,7 +19,7 @@ def convert(trace,grid,calibration,selection=None,lead_name=None):
     out['selected_valid']=valid
     calibrated=bool(grid['valid'] and speed is not None and gain is not None)
     if calibrated:
-        out['time_s']=(x-x[0])/(grid['x']['pixels_per_mm']*speed)
+        out['time_s']=(x-trace.get('time_origin_x_px', x[0]))/(grid['x']['pixels_per_mm']*speed)
         out['amplitude_mv']=(trace['baseline_y_px']-y)/(grid['y']['pixels_per_mm']*gain)
         out['amplitude_min_mv']=(trace['baseline_y_px']-trace['y_max_px'])/(grid['y']['pixels_per_mm']*gain)
         out['amplitude_max_mv']=(trace['baseline_y_px']-trace['y_min_px'])/(grid['y']['pixels_per_mm']*gain)
