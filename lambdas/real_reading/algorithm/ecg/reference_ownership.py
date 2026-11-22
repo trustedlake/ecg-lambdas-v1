@@ -82,10 +82,15 @@ def free_ends(local, direction):
     if direction == -1:
         free = free[::-1]
     free = free[4:-4, 4:-4]
-    count, labels = cv2.connectedComponents(free.astype(np.uint8), connectivity=8)
-    for k in range(1, count):
-        yy, xx = np.nonzero(labels == k)
-        at = np.argmin(yy*direction)
+    _, labels = cv2.connectedComponents(free.astype(np.uint8), connectivity=8)
+    yy, xx = np.nonzero(labels)
+    if not len(yy):
+        return
+    owner = labels[yy, xx]
+    # The extreme pixel of every free end, in one pass.
+    order = np.lexsort((yy*direction, owner))
+    first = order[np.r_[True, owner[order][1:] != owner[order][:-1]]]
+    for at in first:
         yield int(xx[at]), int(yy[at])
 
 
