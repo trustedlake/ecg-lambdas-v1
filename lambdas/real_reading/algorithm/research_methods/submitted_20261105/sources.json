@@ -1,0 +1,10 @@
+﻿{
+    "components_dividers.py":  "extrair_ecg_opencv5.py",
+    "components_boxes.py":  "extrair_ecg (2).py",
+    "components_close.py":  "extrair_ecg_opencv5 (1).py",
+    "components_extents.py":  "extract_ecg.py",
+    "band_mask.py":  "extrair_ecg.py",
+    "components_bands.py":  "extrair_ecg (1).py",
+    "ink_path.py":  "ecg_trace_opencv5.py",
+    "skeleton_path.py":  "ecg_trace_opencv5 (1).py"
+}

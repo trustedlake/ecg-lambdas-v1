@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 from review.overlay import render
 from .contracts import Context, MethodAbstention
-from .registry import METHODS
+from .research_registry import METHODS
 from .features import measure
 from .frozen_peaks34.ecg.config import resolve
 from .frozen_peaks34.ecg.preprocess import prepare
