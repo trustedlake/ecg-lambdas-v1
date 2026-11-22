@@ -59,6 +59,15 @@ def _validate(event):
         if type(value) not in (int, float) or not math.isfinite(value) or float(value) not in allowed:
             raise ContractError('CALIBRATION_INVALID', details={'field': field, 'received': value, 'allowed': list(allowed)})
         cal[field] = float(value)
+    region=calibration.get('region_normalized')
+    if region is not None:
+        if (not isinstance(region,list) or len(region)!=4 or
+            any(not isinstance(point,list) or len(point)!=2 or
+                any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1 for v in point)
+                for point in region)):
+            raise ContractError('CALIBRATION_INVALID',details={'field':'region_normalized',
+                'reason':'Expected four normalized points in decoded EXIF-oriented source coordinates'})
+        cal['region_normalized']=deepcopy(region)
     source = event.get('image')
     if not isinstance(source, dict) or not all(isinstance(source.get(k), str) and source[k]
                                                     for k in ('bucket', 'key')):
@@ -117,6 +126,8 @@ def _config(layout, calibration):
         'speed_source': 'Explicit request v2',
         'gain_source': 'Explicit request v2',
     }
+    if calibration.get('region_normalized') is not None:
+        config['calibration_region_normalized']=deepcopy(calibration['region_normalized'])
     # Filenames do not pick layouts or image-specific refinements.
     return resolve(config, 'ecg_input.png')
 
@@ -440,15 +451,15 @@ def handler(event, context):
         # Rows sit where the app's crop guide puts them, not at whole-paper positions.
         config['paper_baseline_fractions'] = config['baseline_fractions']
         import cv2
-        from research_methods.frozen_peaks34.ecg.preprocess import prepare
-        from research_methods.frozen_peaks34.ecg.grid import estimate_grid
+        from ecg.preprocess import prepare
+        from ecg.grid import estimate_grid
         from research_methods.registry import METHODS
         cv2.setNumThreads(1)
         with tempfile.TemporaryDirectory(dir='/tmp') as directory:
             path = Path(directory)/('input'+suffix)
             path.write_bytes(raw)
-            image, geometry = prepare(path, config)
-            grid = _usable_grid(estimate_grid(image, config), image, config)
+            image, geometry = prepare(path, config, full_photo=True)
+            grid = _usable_grid(estimate_grid(image, config, geometry), image, config)
             image.setflags(write=False)
             prefix = f'reading/{env.request_id}/{uuid.uuid4().hex}/'
             rows, _ = _run_methods(METHODS, image, geometry, grid, config, prefix)

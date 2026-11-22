@@ -40,7 +40,20 @@ def periodicity(profile,expected_major_px=None):
     return period,score
 
 
-def estimate_grid(a,config):
+def estimate_grid(a,config,geometry=None):
+    if geometry and geometry.get('calibration_box'):
+        x0,y0,x1,y1=geometry['calibration_box']
+        local=dict(config)
+        lx0,_,lx1,_=geometry.get('layout_box',geometry['calibration_box'])
+        local['grid_width_mm_hint']=config['grid_width_mm_hint']*(x1-x0)/(lx1-lx0)
+        measured=estimate_grid(a[y0:y1,x0:x1],local)
+        for axis,offset in [('x',x0),('y',y0)]:
+            if measured[axis].get('phase_px') is not None:
+                measured[axis]['phase_px']+=offset
+            if measured['controls'][axis] is not None:
+                measured['controls'][axis]=[v+offset for v in measured['controls'][axis]]
+        measured['calibration_box']=[x0,y0,x1,y1]
+        return measured
     h,w=a.shape[:2];f=a.astype(np.float32)
     chroma=np.maximum(0,np.minimum(f[:,:,0]-f[:,:,1],f[:,:,0]-f[:,:,2]))
     if np.mean(red_evidence(a))>.002:

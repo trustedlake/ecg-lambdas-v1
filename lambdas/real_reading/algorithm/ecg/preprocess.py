@@ -83,7 +83,7 @@ def locate_quad(a):
     return np.array([[0,0],[w-1,0],[w-1,h-1],[0,h-1]],np.float32),'full_image_fallback'
 
 
-def prepare(source,config,page=0):
+def prepare(source,config,page=0,*,full_photo=False):
     a,original_size=decode(source,page,config.get('max_side',2400))
     h,w=a.shape[:2]
     if config.get('quad_normalized'):
@@ -94,12 +94,52 @@ def prepare(source,config,page=0):
     nh=int(round(max(np.linalg.norm(bl-tl),np.linalg.norm(br-tr))))+1
     if min(nw,nh)<100: raise ValueError('Detected image region too small')
     matrix=cv2.getPerspectiveTransform(quad,np.float32([[0,0],[nw-1,0],[nw-1,nh-1],[0,nh-1]]))
-    rect=cv2.warpPerspective(a,matrix,(nw,nh),borderValue=(255,255,255))
-    rect,rotation,orientation=orient_landscape(rect,config,method)
+    calibration=cv2.warpPerspective(a,matrix,(nw,nh),borderValue=(255,255,255))
+    calibration,rotation,orientation=orient_landscape(calibration,config,method)
+    matrix=rotation@matrix
+    if not full_photo:
+        scale=np.diag([w/original_size[0],h/original_size[1],1.])
+        transform=matrix@scale
+        nh,nw=calibration.shape[:2]
+        return calibration,{'method':method,'source_coordinate_system':'decoded_EXIF_oriented_pixels',
+            'source_size':original_size,'working_size':[nw,nh],
+            'source_to_working':transform.tolist(),'working_to_source':np.linalg.inv(transform).tolist(),
+            'quad_source':(quad/[w/original_size[0],h/original_size[1]]).tolist(),
+            'orientation':orientation,'model':'planar_homography','nonlinear_paper_warp_corrected':False}
+    # The quadrilateral defines a coordinate frame, never the extraction bounds.
+    corners=np.float32([[0,0],[w-1,0],[w-1,h-1],[0,h-1]])
+    homogeneous=np.column_stack((corners,np.ones(4)))@matrix.T
+    if np.min(homogeneous[:,2])*np.max(homogeneous[:,2])<=0:
+        raise ValueError('Photo crosses the rectification horizon')
+    projected=homogeneous[:,:2]/homogeneous[:,2:]
+    lower=np.floor(projected.min(0));upper=np.ceil(projected.max(0))
+    size=(upper-lower+1).astype(int)
+    if min(size)<=0 or int(size[0])*int(size[1])>4*config.get('max_side',2400)**2:
+        raise ValueError('Full photo rectification exceeds the bounded canvas')
+    translation=np.array([[1,0,-lower[0]],[0,1,-lower[1]],[0,0,1.]])
+    matrix=translation@matrix
+    rect=cv2.warpPerspective(a,matrix,tuple(size),borderValue=(255,255,255))
+    x,y=(-lower).astype(int);ch,cw=calibration.shape[:2]
+    calibration_box=[int(x),int(y),int(x+cw),int(y+ch)]
     nh,nw=rect.shape[:2]
     scale=np.diag([w/original_size[0],h/original_size[1],1.])
-    transform=rotation@matrix@scale
+    transform=matrix@scale
+    layout_box=calibration_box.copy()
+    region=config.get('calibration_region_normalized')
+    if region is not None:
+        points=np.asarray(region,dtype=np.float32)
+        if points.shape!=(4,2) or not np.isfinite(points).all() or np.any((points<0)|(points>1)):
+            raise ValueError('Calibration region must be four normalized source points')
+        points=cv2.perspectiveTransform((points*np.array(original_size)).astype(np.float32)[None],transform)[0]
+        # An inner axis-aligned rectangle stays within the supplied convex region.
+        points=order_quad(points)
+        cx0=int(np.ceil(max(points[0,0],points[3,0])));cx1=int(np.floor(min(points[1,0],points[2,0])))
+        cy0=int(np.ceil(max(points[0,1],points[1,1])));cy1=int(np.floor(min(points[2,1],points[3,1])))
+        calibration_box=[max(0,cx0),max(0,cy0),min(nw,cx1),min(nh,cy1)]
+        if calibration_box[2]-calibration_box[0]<100 or calibration_box[3]-calibration_box[1]<100:
+            raise ValueError('Calibration region too small after transformation')
     return rect,{'method':method,'source_coordinate_system':'decoded_EXIF_oriented_pixels','source_size':original_size,
                  'working_size':[nw,nh],'source_to_working':transform.tolist(),'working_to_source':np.linalg.inv(transform).tolist(),
                  'quad_source':(quad/[w/original_size[0],h/original_size[1]]).tolist(),
+                 'calibration_box':calibration_box,'layout_box':layout_box,'extraction_domain':'full_photo',
                  'orientation':orientation,'model':'planar_homography','nonlinear_paper_warp_corrected':False}

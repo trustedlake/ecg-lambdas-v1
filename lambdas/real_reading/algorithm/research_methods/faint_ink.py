@@ -5,12 +5,14 @@ from .contracts import Extraction
 import cv2
 import numpy as np
 
-VERSION = 'slanted-grid-crossings'
+VERSION = 'slanted-grid-full-photo-anchors-1'
 
 
 def extract(context):
     raw, contrast = signal_tinted.ink_evidence(context.image)
-    leads = signal_tinted.locate_leads(raw, context.config, context.geometry)
+    from .common import locate_full_photo, trace_full_photo
+    full=context.geometry.get('extraction_domain')=='full_photo'
+    leads = locate_full_photo(raw,context) if full else signal_tinted.locate_leads(raw, context.config, context.geometry)
     extra, _ = signal_tinted.stroke_evidence(context.image)
     colors = context.image.astype(np.float32)
     scale = max(9, round(min(raw.shape) * .016) | 1)
@@ -28,6 +30,8 @@ def extract(context):
     neutral = np.ptp(colors,axis=2)<12
     raw=(((detail>18)&(absorption>8)) | ((raw>0)&neutral)).astype(np.uint8)
     contrast=np.maximum(0,detail)
+    if full:
+        return trace_full_photo(context,raw,contrast,leads)
     extra=raw>0
     crossing = (colors.max(axis=2) < 210) & (np.ptp(colors, axis=2) < 90) & (absorption > 12)
     traces = []
