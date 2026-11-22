@@ -35,8 +35,8 @@ def digest(root=HERE):
 
 def _git(*args):
     try:
-        return subprocess.run(['git', '-C', str(HERE), *args], capture_output=True, text=True,
-                              timeout=20).stdout.strip() or None
+        done = subprocess.run(['git', '-C', str(HERE), *args], capture_output=True, text=True, timeout=20)
+        return done.stdout.strip() if done.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
         return None
 
