@@ -51,6 +51,9 @@ def evidence(rgb):
 
 def extract(context):
     ink, strength, grid, frame = evidence(context.image)
+    if 'reference_box_px' in context.geometry:
+        from ecg.reference_trace import trace_reference
+        return trace_reference(context, ink, strength)
     joined = cv2.dilate(ink.astype(np.uint8), np.ones((3, 7), np.uint8))
     _, components, stats, _ = cv2.connectedComponentsWithStats(joined, 8)
     keep = (stats[:, 2] > ink.shape[1] * .045) & (stats[:, 3] < ink.shape[0] * .35)

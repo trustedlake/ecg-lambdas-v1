@@ -6,5 +6,9 @@ VERSION = 'neutral-color-v1'
 
 
 def extract(context):
-    raw, contrast = ink_evidence(context.image)
+    if 'reference_box_px' in context.geometry:
+        from ecg.signal_neutral import reference_ink_evidence
+        raw, contrast = reference_ink_evidence(context.image)
+    else:
+        raw, contrast = ink_evidence(context.image)
     return trace_evidence(context, raw, contrast)

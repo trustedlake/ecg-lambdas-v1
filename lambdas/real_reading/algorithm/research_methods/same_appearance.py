@@ -12,6 +12,10 @@ def extract(context):
     background = cv2.GaussianBlur(gray, (0, 0), 7)
     contrast = np.maximum(0, background-gray)
     ink = ((contrast > 6) & (gray < .90*np.maximum(background, 1))).astype(np.uint8)
+    if 'reference_box_px' in context.geometry:
+        # Grid and trace are separated by colour over the whole photo, so the
+        # trace is kept where it crosses a printed line.
+        return trace_evidence(context, ink, contrast)
     try:
         excluded = grid_mask(ink, context.grid)
     except (ValueError, TypeError, KeyError):

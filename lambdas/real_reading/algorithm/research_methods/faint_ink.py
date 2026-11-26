@@ -10,7 +10,12 @@ VERSION = 'slanted-grid-crossings'
 
 def extract(context):
     raw, contrast = signal_tinted.ink_evidence(context.image)
-    leads = signal_tinted.locate_leads(raw, context.config, context.geometry)
+    if 'reference_box_px' in context.geometry:
+        _, y0, _, y1 = context.geometry['reference_box_px']
+        # Only a scale for the background filter; rows are measured when tracing.
+        leads = [{'row_spacing_px': (y1-y0)/len(context.config['baseline_fractions'])}]
+    else:
+        leads = signal_tinted.locate_leads(raw, context.config, context.geometry)
     extra, _ = signal_tinted.stroke_evidence(context.image)
     colors = context.image.astype(np.float32)
     scale = max(9, round(min(raw.shape) * .016) | 1)
@@ -21,13 +26,24 @@ def extract(context):
     red=colors[...,0]
     length=max(31,int(np.median([l['row_spacing_px'] for l in leads])*2)|1)
     # Robust directional background includes sustained grid but not short waves.
-    v=median_filter(red,size=(length,1),mode='nearest')
-    h=median_filter(red,size=(1,length),mode='nearest')
+    if 'reference_box_px' in context.geometry:
+        # The whole photo is much larger. Sample only along each filtered axis,
+        # which keeps the printed lines of the other axis sharp.
+        height, width = red.shape
+        size = max(3, (length//8) | 1)
+        v=cv2.resize(median_filter(red[::8],size=(size,1),mode='nearest'),(width,height))
+        h=cv2.resize(median_filter(red[:,::8],size=(1,size),mode='nearest'),(width,height))
+    else:
+        v=median_filter(red,size=(length,1),mode='nearest')
+        h=median_filter(red,size=(1,length),mode='nearest')
     background=np.minimum(v,h)
     detail=background-red
     neutral = np.ptp(colors,axis=2)<12
     raw=(((detail>18)&(absorption>8)) | ((raw>0)&neutral)).astype(np.uint8)
     contrast=np.maximum(0,detail)
+    if 'reference_box_px' in context.geometry:
+        from ecg.reference_trace import trace_reference
+        return trace_reference(context, raw, contrast)
     extra=raw>0
     crossing = (colors.max(axis=2) < 210) & (np.ptp(colors, axis=2) < 90) & (absorption > 12)
     traces = []

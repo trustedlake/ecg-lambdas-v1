@@ -18,6 +18,20 @@ def ink_evidence(image):
     return raw,255-light
 
 
+def reference_ink_evidence(image):
+    """Neutral absorption relative to local paper, for an unbounded domain.
+
+    Absolute darkness alone confuses shaded red grid with black ink. Separate
+    chromaticity from luminance before measuring local contrast on the full RGB.
+    """
+    f=image.astype(np.float32)
+    channel=np.clip(f.max(2)+2.5*np.ptp(f,axis=2),0,255)
+    background=cv2.GaussianBlur(channel,(0,0),7)
+    contrast=np.maximum(0,background-channel)
+    raw=((contrast>6)&(channel<.94*np.maximum(background,1))).astype(np.uint8)
+    return raw,contrast
+
+
 def extract_lead(raw,contrast,lead):
     local=dict(lead)
     x0,x1=lead['trace_x'];step=lead['row_spacing_px']
